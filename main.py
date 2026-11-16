@@ -6,7 +6,7 @@ from datetime import datetime
 # CONFIGURATION
 # ======================
 WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
-CHECK_INTERVAL = 3600  # 1 hour
+CHECK_INTERVAL = 120  # 2 minutes
 
 def send_discord_message(content: str, title: str = "Memecoin Alert"):
     data = {
@@ -28,7 +28,7 @@ def send_discord_message(content: str, title: str = "Memecoin Alert"):
 
 def check_for_tokens():
     # Placeholder for now
-    message = "**No strong new setups right now.**\n\nBot is running and checking hourly."
+    message = "**No strong new setups right now.**\n\nBot is running and checking every 2 minutes."
     send_discord_message(message)
 
 if __name__ == "__main__":
