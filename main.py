@@ -8,48 +8,47 @@ from datetime import datetime, timezone
 # ======================================================
 # CONFIGURATION
 # ======================================================
-# Put your NEW webhook in an environment variable (recommended) or paste it below.
-WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "PASTE_YOUR_NEW_WEBHOOK_URL_HERE")
+WEBHOOK_URL = os.getenv(
+    "DISCORD_WEBHOOK_URL",
+    "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp",
+)
 
-# OPTIONAL: lets Claude read each coin and judge its meaning/narrative.
-# Get a key at console.anthropic.com and set ANTHROPIC_API_KEY. Without it, a keyword check is used.
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-AI_MODEL = "claude-haiku-5-5"
-
-CHECK_INTERVAL = 60             # seconds between scans (new coins move fast)
-REALERT_AFTER = 12 * 3600       # don't repeat the same coin for 12 hours
-RECHECK_REJECTED_AFTER = 3600   # re-check a rejected coin after 1 hour
-MAX_ALERTS_PER_SCAN = 5
-MAX_DEEP_CHECKS_PER_SCAN = 15   # how many top candidates get the full safety/narrative check
+CHECK_INTERVAL = 60              # seconds between scans (new coins move fast)
+REALERT_AFTER = 12 * 3600        # never repeat the same coin within 12 hours
+RECHECK_REJECTED_AFTER = 1800    # re-check a rejected coin after 30 minutes
+MAX_ALERTS_PER_SCAN = 4
+MAX_DEEP_CHECKS_PER_SCAN = 15
+STATUS_EVERY = 6 * 3600          # "bot is alive" status message interval
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_state.json")
 
 # ---- Market filters (tuned for EARLY coins, ~1 hour old) ----
-MIN_PAIR_AGE_MIN = 40           # not too early: skip the first 40 min (sniper/rug zone)
-MAX_PAIR_AGE_MIN = 240          # not too late: skip anything older than 4 hours
+MIN_PAIR_AGE_MIN = 40            # skip the first 40 min (sniper / rug zone)
+MAX_PAIR_AGE_MIN = 240           # skip anything older than 4 hours (too late)
 MIN_LIQUIDITY_USD = 10_000
-MIN_VOLUME_24H = 25_000         # for young coins this is basically lifetime volume
+MIN_VOLUME_24H = 25_000
 MIN_MARKET_CAP = 40_000
-MAX_MARKET_CAP = 5_000_000      # still early
+MAX_MARKET_CAP = 5_000_000
 MIN_TXNS_24H = 150
 MIN_LIQ_TO_MCAP = 0.06
 MIN_BUY_SELL_RATIO_H1 = 1.2
-MAX_24H_PUMP_PCT = 800          # skip coins that already ran too hard (too late)
-MIN_SCORE = 65                  # 0-100 bullish score needed
+MAX_24H_PUMP_PCT = 800           # already ran too hard = too late
+MIN_SCORE = 70                   # final 0-100 score needed to alert
 
-# ---- Safety filters ----
-REQUIRE_SAFETY_DATA = True      # if the rug checkers can't answer, SKIP the coin (safer)
-MAX_RUGCHECK_SCORE = 50         # Solana: reject above this risk score
-MAX_TOP10_HOLDER_PCT = 60       # Solana: reject if top 10 wallets hold more than this %
-MIN_HOLDERS = 80                # young coins have fewer holders
-MAX_INSIDERS_TOP10 = 2          # Solana: max insider/linked wallets among top 10
-MIN_SOCIAL_LINKS = 1            # must have a website or social link (authenticity)
-MAX_TAX_PCT = 10                # EVM: reject buy/sell tax above this
-REQUIRE_NARRATIVE = True        # coin must have a description or a website
-AI_REQUIRED_VERDICTS = {"good"} # when AI is on, only these verdicts get through
+# ---- Safety / authenticity filters ----
+REQUIRE_SAFETY_DATA = True       # if the safety checkers can't answer, skip the coin
+MAX_RUGCHECK_SCORE = 50
+MAX_TOP10_HOLDER_PCT = 60
+MIN_HOLDERS = 80
+MAX_INSIDERS_TOP10 = 2
+MAX_TAX_PCT = 10
+MIN_SOCIAL_LINKS = 1             # must have a website or social link
+REQUIRE_NARRATIVE = True         # must have a description or a website
 
 CHAINS = {"solana", "base", "ethereum", "bsc"}
 GECKO_NETWORKS = {"solana": "solana", "base": "base", "eth": "ethereum", "bsc": "bsc"}
 GOPLUS_CHAIN = {"ethereum": "1", "bsc": "56", "base": "8453"}
 GMGN_CHAIN = {"solana": "sol", "base": "base", "ethereum": "eth", "bsc": "bsc"}
+CHECKPOINTS_H = (1, 6, 24)       # when to report how past alerts performed
 
 RED_WORDS = [
     "guaranteed", "risk free", "risk-free", "no risk", "can't lose", "cant lose", "presale",
@@ -58,13 +57,49 @@ RED_WORDS = [
 ]
 RED_RE = re.compile(r"\b(" + "|".join(re.escape(w) for w in RED_WORDS) + r")\b", re.I)
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (memecoin-discord-bot/2.0)", "Accept": "application/json"}
+THEMES = {
+    "Animal meme": {"dog", "doge", "cat", "kitty", "frog", "pepe", "shib", "inu", "monkey", "ape", "bear", "bull",
+                    "penguin", "hamster", "rabbit", "duck", "fox", "wolf", "bird", "fish", "whale", "pig", "cow",
+                    "horse", "panda", "tiger", "lion", "bonk", "wif", "hippo", "goat", "cheems", "pup", "puppy"},
+    "Politics / public figure": {"trump", "maga", "biden", "elon", "musk", "president", "election", "vote", "congress"},
+    "Tech / automation": {"ai", "agent", "agents", "gpt", "bot", "robot", "neural", "quantum", "cyber", "tech", "agi"},
+    "Internet culture": {"meme", "viral", "brainrot", "skibidi", "sigma", "rizz", "npc", "gigachad", "chad", "wojak",
+                         "based", "tiktok", "anime", "gaming", "gamer", "vibes"},
+}
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; scanner/3.0)", "Accept": "application/json"}
 DEX = "https://api.dexscreener.com"
 GECKO = "https://api.geckoterminal.com/api/v2"
 
-alerted = {}    # "chain:address" -> ts
-rejected = {}   # "chain:address" -> ts
-profile_desc = {}  # "chain:address" -> description from DexScreener profiles
+DEFAULT_STATE = {"alerted": {}, "rejected": {}, "tracked": {},
+                 "stats": {"n": 0, "wins": 0, "sum": 0.0, "x2": 0},
+                 "scans": 0, "alerts": 0, "last_status": 0}
+profile_desc = {}
+
+
+# ======================================================
+# STATE (survives restarts)
+# ======================================================
+def load_state():
+    try:
+        with open(STATE_FILE) as f:
+            s = json.load(f)
+    except Exception:
+        s = {}
+    for k, v in DEFAULT_STATE.items():
+        s.setdefault(k, json.loads(json.dumps(v)))
+    return s
+
+
+def save_state():
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f)
+    except Exception as e:
+        print(f"  could not save state: {e}")
+
+
+state = load_state()
 
 
 # ======================================================
@@ -98,15 +133,26 @@ def get_json(url, params=None, retries=2, timeout=15):
     return None
 
 
+def fmt_usd(n):
+    if n >= 1e9: return f"${n/1e9:.2f}B"
+    if n >= 1e6: return f"${n/1e6:.2f}M"
+    if n >= 1e3: return f"${n/1e3:.1f}K"
+    return f"${n:.2f}"
+
+
+def fmt_age(m):
+    if m < 60: return f"{m:.0f}m"
+    if m < 1440: return f"{m/60:.1f}h"
+    return f"{m/1440:.1f}d"
+
+
 # ======================================================
-# 1) COLLECT CANDIDATES (covers coins traded on pump.fun, Axiom, Fomo, etc.)
-# Axiom/Fomo/Photon/BullX are trading terminals on top of the same chains and DEXes,
-# so scanning the chains' DEX data (pump.fun, PumpSwap, Raydium, Meteora, Uniswap,
-# PancakeSwap...) covers every coin those apps can trade.
+# 1) FIND COINS (everything pump.fun / Axiom / Fomo / Photon / BullX etc. can trade)
 # ======================================================
 def from_dexscreener_lists():
     found = set()
-    for path in ("/token-profiles/latest/v1", "/token-boosts/latest/v1", "/token-boosts/top/v1"):
+    for path in ("/token-profiles/latest/v1", "/token-boosts/latest/v1", "/token-boosts/top/v1",
+                 "/community-takeovers/latest/v1"):
         data = get_json(DEX + path)
         if isinstance(data, list):
             for t in data:
@@ -173,16 +219,17 @@ def fetch_pairs(candidates):
 
 
 # ======================================================
-# 2) MARKET FILTER + BULLISH SCORE
+# 2) MARKET FILTER + MOMENTUM SCORE
 # ======================================================
-def evaluate(pair):
+def evaluate(pair, nsrc=1):
     liq = num((pair.get("liquidity") or {}).get("usd"))
     mcap = num(pair.get("marketCap") or pair.get("fdv"))
     vol24 = num((pair.get("volume") or {}).get("h24"))
     vol1 = num((pair.get("volume") or {}).get("h1"))
     pc = pair.get("priceChange") or {}
-    ch1, ch6, ch24 = num(pc.get("h1")), num(pc.get("h6")), num(pc.get("h24"))
+    ch5, ch1, ch6, ch24 = num(pc.get("m5")), num(pc.get("h1")), num(pc.get("h6")), num(pc.get("h24"))
     tx = pair.get("txns") or {}
+    b5, s5 = num((tx.get("m5") or {}).get("buys")), num((tx.get("m5") or {}).get("sells"))
     b1, s1 = num((tx.get("h1") or {}).get("buys")), num((tx.get("h1") or {}).get("sells"))
     b24, s24 = num((tx.get("h24") or {}).get("buys")), num((tx.get("h24") or {}).get("sells"))
     created = pair.get("pairCreatedAt")
@@ -198,34 +245,39 @@ def evaluate(pair):
         return None
     if ch24 > MAX_24H_PUMP_PCT or ch1 < -5 or ch24 < -30:
         return None
-    ratio1, ratio24 = b1 / max(s1, 1), b24 / max(s24, 1)
+    ratio1, ratio24, ratio5 = b1 / max(s1, 1), b24 / max(s24, 1), b5 / max(s5, 1)
     if ratio1 < MIN_BUY_SELL_RATIO_H1 or ratio24 < 0.95:
         return None
-    if b24 > 50 and s24 == 0:  # honeypot-like behaviour
+    if (b5 + s5) >= 10 and ratio5 < 0.8:   # momentum fading right now
+        return None
+    if b24 > 50 and s24 == 0:              # honeypot-like behaviour
         return None
 
     score = 0
-    score += min(20, ratio1 * 8)
-    score += min(10, max(0, (ratio24 - 1) * 20))
-    score += 10 if ch1 > 0 else 0
-    score += 8 if ch6 > 0 else 0
-    score += 7 if 5 <= ch24 <= 400 else (3 if ch24 > 0 else 0)
-    score += min(15, (vol1 * 24 / max(vol24, 1)) * 7)
-    score += min(10, (liq / max(mcap, 1)) * 100)
-    score += 5 if liq >= 50_000 else 0
+    score += min(20, ratio1 * 8)                              # buy pressure (1h)
+    score += min(8, ratio5 * 3) if (b5 + s5) >= 5 else 0      # buy pressure (5m)
+    score += min(10, max(0, (ratio24 - 1) * 20))              # buy pressure (lifetime)
+    score += 8 if ch5 >= 0 else 0
+    score += 8 if ch1 > 0 else 0
+    score += 6 if ch6 > 0 else 0
+    score += 6 if 5 <= ch24 <= 400 else (2 if ch24 > 0 else 0)
+    score += min(12, (vol1 * 24 / max(vol24, 1)) * 6)         # volume accelerating
+    score += min(8, (liq / max(mcap, 1)) * 80)                # liquidity depth
+    score += 4 if liq >= 40_000 else 0
     info = pair.get("info") or {}
-    score += 5 if info.get("socials") else 0
-    score += 5 if info.get("websites") else 0
-    score += 10 if 45 <= age_min <= 120 else (5 if age_min <= 240 else 0)  # sweet spot ~1h old
+    score += 4 if info.get("socials") else 0
+    score += 4 if info.get("websites") else 0
+    score += 10 if 45 <= age_min <= 120 else (5 if age_min <= 240 else 0)   # sweet spot ~1h old
+    score += min(10, (nsrc - 1) * 5)                          # seen on several sources
 
     return min(100, round(score)), {
         "liq": liq, "mcap": mcap, "vol24": vol24, "ch1": ch1, "ch6": ch6, "ch24": ch24,
-        "ratio1": ratio1, "age_min": age_min, "txns": b24 + s24,
+        "ratio1": ratio1, "ratio5": ratio5, "age_min": age_min, "txns": b24 + s24, "nsrc": nsrc,
     }
 
 
 # ======================================================
-# 3) DEEP SAFETY CHECKS
+# 3) SAFETY, AUTHENTICITY & NARRATIVE
 # ======================================================
 def fetch_ipfs_json(uri):
     if not uri:
@@ -236,7 +288,6 @@ def fetch_ipfs_json(uri):
 
 
 def rugcheck_solana(mint):
-    """Full rugcheck.xyz report: authorities, holders, risks, plus token metadata."""
     data = get_json(f"https://api.rugcheck.xyz/v1/tokens/{mint}/report")
     if not data:
         return {"ok": not REQUIRE_SAFETY_DATA, "note": "RugCheck unavailable"}
@@ -286,7 +337,6 @@ def rugcheck_solana(mint):
 
 
 def goplus_check(chain, addr):
-    """GoPlus token security for Ethereum / BSC / Base."""
     data = get_json(f"https://api.gopluslabs.io/api/v1/token_security/{GOPLUS_CHAIN[chain]}",
                     params={"contract_addresses": addr})
     res = ((data or {}).get("result") or {}).get(addr.lower())
@@ -310,7 +360,8 @@ def goplus_check(chain, addr):
     if holders < MIN_HOLDERS:
         reasons.append(f"only {holders} holders")
     return {"ok": not reasons,
-            "note": "; ".join(reasons) if reasons else f"Clean ✅ • Holders: {holders} • Tax {num(res.get('buy_tax'))*100:.0f}%/{num(res.get('sell_tax'))*100:.0f}%",
+            "note": "; ".join(reasons) if reasons else
+            f"Clean ✅ • Holders: {holders} • Tax {num(res.get('buy_tax'))*100:.0f}%/{num(res.get('sell_tax'))*100:.0f}%",
             "desc": "", "image": ""}
 
 
@@ -326,31 +377,6 @@ def fetch_site_blurb(url):
         return ""
 
 
-def ai_analyze(name, symbol, chain, desc, site_blurb, socials, d):
-    """Claude reads the coin and judges the meaning / narrative / red flags."""
-    prompt = f"""You are a skeptical crypto analyst. Judge this memecoin's concept ONLY from the info given.
-Name: {name} (${symbol}) on {chain}
-Description: {desc or 'none'}
-Website snippet: {site_blurb or 'none'}
-Socials: {', '.join(socials) or 'none'}
-Market: mcap ${d['mcap']:,.0f}, liquidity ${d['liq']:,.0f}, 24h change {d['ch24']:+.0f}%, age {d['age_min']/60:.1f}h
-
-Reply with ONLY a JSON object: {{"verdict":"good|neutral|bad","summary":"one sentence on what the coin is about","narrative":"the theme/meme/trend it rides and why it could (or couldn't) catch on","red_flags":["..."]}}
-Use "bad" for scam wording, impersonation, empty/low-effort concepts, or anything shady. Use "good" only for a clear, memeable, genuinely appealing concept."""
-    try:
-        r = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": AI_MODEL, "max_tokens": 400, "messages": [{"role": "user", "content": prompt}]},
-            timeout=30,
-        )
-        text = r.json()["content"][0]["text"]
-        return json.loads(re.search(r"\{.*\}", text, re.S).group(0))
-    except Exception as e:
-        print(f"  AI analysis failed: {e}")
-        return None
-
-
 def copycat_check(pair):
     """Authenticity: reject coins copying the name/ticker of a bigger or older coin."""
     chain = pair["chainId"]
@@ -362,7 +388,7 @@ def copycat_check(pair):
     my_created = pair.get("pairCreatedAt") or 0
     data = get_json(f"{DEX}/latest/dex/search", params={"q": base.get("symbol") or base.get("name")})
     if data is None:
-        return None if not REQUIRE_SAFETY_DATA else "couldn't verify originality"
+        return "couldn't verify originality" if REQUIRE_SAFETY_DATA else None
     for p in data.get("pairs", []) or []:
         b = p.get("baseToken") or {}
         if b.get("address") == addr:
@@ -380,6 +406,31 @@ def copycat_check(pair):
         elif their_liq > 100_000 and their_created and their_created < my_created - 86_400_000:
             return f"impersonating established coin: {label}"
     return None
+
+
+def read_coin(name, symbol, desc, site_blurb):
+    """Reads the coin's theme and description quality. Returns (note, score_bonus)."""
+    text = " ".join([name or "", symbol or "", desc or "", site_blurb or ""]).lower()
+    words = set(re.findall(r"[a-z0-9]+", text))
+    labels = [label for label, kw in THEMES.items() if words & kw]
+    bonus, bits = 0, []
+    if labels:
+        bonus += 3
+        bits.append("/".join(labels) + " theme")
+    else:
+        bits.append("no clear theme")
+    if len((desc or "").strip()) >= 60:
+        bonus += 3
+        bits.append("clear description")
+    if site_blurb:
+        bonus += 2
+        bits.append("live website")
+    d = (desc or "").strip()
+    letters = sum(c.isalpha() for c in d)
+    if len(d) > 30 and (d.count("!") > 3 or (letters and sum(c.isupper() for c in d) / letters > 0.6)):
+        bonus -= 5
+        bits.append("shilly wording")
+    return " • ".join(bits), bonus
 
 
 def deep_check(pair, d):
@@ -401,6 +452,7 @@ def deep_check(pair, d):
     socials = [s.get("url") for s in info.get("socials") or [] if s.get("url")]
     if len(sites) + len(socials) < MIN_SOCIAL_LINKS:
         return False, "no website/socials (can't verify it's real)", None
+
     desc = (profile_desc.get(key) or safety.get("desc") or "").strip()
     site_blurb = fetch_site_blurb(sites[0]) if sites and len(desc) < 40 else ""
 
@@ -411,35 +463,16 @@ def deep_check(pair, d):
     if REQUIRE_NARRATIVE and len(desc) < 15 and not sites and not site_blurb:
         return False, "no description or website (anonymous/low effort)", None
 
-    ai = None
-    if ANTHROPIC_API_KEY:
-        ai = ai_analyze(base.get("name"), base.get("symbol"), chain, desc, site_blurb, socials, d)
-        if ai:
-            verdict = str(ai.get("verdict", "")).lower()
-            if verdict not in AI_REQUIRED_VERDICTS:
-                return False, f"AI verdict {verdict}: {ai.get('summary', '')}", None
-
+    narr, bonus = read_coin(base.get("name"), base.get("symbol"), desc, site_blurb)
     image = info.get("imageUrl") or safety.get("image") or ""
-    return True, "ok", {"safety": safety["note"] + " • Authentic ✅ no older/bigger copycat found", "desc": desc, "site_blurb": site_blurb,
-                        "ai": ai, "image": image, "sites": sites, "socials": socials}
+    return True, "ok", {"safety": safety["note"] + " • Authentic ✅ no older/bigger copycat found",
+                        "desc": desc, "site_blurb": site_blurb, "narr": narr, "bonus": bonus,
+                        "image": image, "sites": sites, "socials": socials}
 
 
 # ======================================================
-# 4) DISCORD ALERTS
+# 4) DISCORD
 # ======================================================
-def fmt_usd(n):
-    if n >= 1e9: return f"${n/1e9:.2f}B"
-    if n >= 1e6: return f"${n/1e6:.2f}M"
-    if n >= 1e3: return f"${n/1e3:.1f}K"
-    return f"${n:.2f}"
-
-
-def fmt_age(m):
-    if m < 60: return f"{m:.0f}m"
-    if m < 1440: return f"{m/60:.1f}h"
-    return f"{m/1440:.1f}d"
-
-
 def trade_links(pair):
     chain = pair["chainId"]
     addr = (pair.get("baseToken") or {}).get("address")
@@ -453,42 +486,47 @@ def trade_links(pair):
     return " • ".join(links)
 
 
+def tier(score):
+    if score >= 85: return "🔱 S-TIER"
+    if score >= 78: return "🥇 A-TIER"
+    return "🥈 B-TIER"
+
+
 def build_embed(pair, score, d, deep):
     base = pair.get("baseToken") or {}
     chain = pair.get("chainId", "?")
     addr = base.get("address", "?")
-    ai = deep["ai"]
+    price = num(pair.get("priceUsd"))
     about = deep["desc"] or deep["site_blurb"] or "No description provided"
 
-    fields = [{"name": "📝 What it's about", "value": trunc(about, 700), "inline": False}]
-    if ai:
-        flags = ai.get("red_flags") or []
-        txt = f"**{str(ai.get('verdict', '?')).upper()}** — {ai.get('summary', '')}\n🎯 {ai.get('narrative', '')}"
-        if flags:
-            txt += "\n⚠️ " + "; ".join(str(f) for f in flags[:3])
-        fields.append({"name": "🧠 AI read", "value": trunc(txt, 1000), "inline": False})
-    fields += [
+    fields = [
+        {"name": "📝 What it's about", "value": trunc(about, 700), "inline": False},
+        {"name": "🧭 Narrative read", "value": trunc(deep["narr"], 300), "inline": False},
         {"name": "📈 Change", "value": f"1h {d['ch1']:+.1f}%\n6h {d['ch6']:+.1f}%\n24h {d['ch24']:+.1f}%", "inline": True},
-        {"name": "💰 Market", "value": f"MCap {fmt_usd(d['mcap'])}\nLiq {fmt_usd(d['liq'])}\nVol24h {fmt_usd(d['vol24'])}", "inline": True},
-        {"name": "⚡ Activity", "value": f"Buy/Sell 1h {d['ratio1']:.2f}x\nTxns 24h {d['txns']:.0f}\nAge {fmt_age(d['age_min'])}", "inline": True},
-        {"name": "🛡️ Safety", "value": trunc(deep["safety"], 400), "inline": False},
+        {"name": "💰 Market", "value": f"MCap {fmt_usd(d['mcap'])}\nLiq {fmt_usd(d['liq'])}\nVol {fmt_usd(d['vol24'])}", "inline": True},
+        {"name": "⚡ Activity", "value": f"Buys/Sells 1h {d['ratio1']:.2f}x\n5m {d['ratio5']:.2f}x\nTxns {d['txns']:.0f} • Age {fmt_age(d['age_min'])}", "inline": True},
+        {"name": "🛡️ Safety & authenticity", "value": trunc(deep["safety"], 450), "inline": False},
         {"name": "📋 Contract address (tap to copy)", "value": f"`{addr}`", "inline": False},
     ]
-    social_links = [f"[Site]({u})" for u in deep["sites"][:1]]
+    links = [f"[Site]({u})" for u in deep["sites"][:1]]
     for s in (pair.get("info") or {}).get("socials") or []:
         if s.get("url"):
-            social_links.append(f"[{str(s.get('type', 'link')).title()}]({s['url']})")
-    if social_links:
-        fields.append({"name": "🌐 Official links", "value": " • ".join(social_links[:5]), "inline": False})
+            links.append(f"[{str(s.get('type', 'link')).title()}]({s['url']})")
+    if links:
+        fields.append({"name": "🌐 Official links", "value": " • ".join(links[:5]), "inline": False})
     fields.append({"name": "🔗 Trade / analyze", "value": trade_links(pair), "inline": False})
+    fields.append({"name": "🎯 Plan (not advice)",
+                   "value": f"Entry ref `${price:.8g}` • Invalidation −30% (`${price*0.7:.8g}`)\n"
+                            f"Seen on {d['nsrc']} source(s). Size small, take profit in stages, never risk what you can't lose.",
+                   "inline": False})
 
     embed = {
-        "title": f"🚀 {base.get('name', '?')} (${base.get('symbol', '?')}) — Score {score}/100",
+        "title": f"{tier(score)} • {base.get('name', '?')} (${base.get('symbol', '?')}) • {score}/100",
         "description": f"`{chain}` • `{pair.get('dexId', '?')}` • Price `${pair.get('priceUsd', '?')}`",
-        "color": 0x00FF99 if score >= 80 else 0xF1C40F,
+        "color": 0x00FF99 if score >= 85 else (0xF1C40F if score >= 78 else 0x3498DB),
         "url": pair.get("url"),
         "fields": fields,
-        "footer": {"text": "Not financial advice. Nothing is guaranteed. DYOR."},
+        "footer": {"text": "Nothing is guaranteed. DYOR."},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     if deep["image"]:
@@ -500,6 +538,7 @@ def build_embed(pair, score, d, deep):
 
 
 def send_embeds(embeds, content=None):
+    ok = True
     for e in embeds:  # one embed per message so images/fields never get squashed
         payload = {"embeds": [e]}
         if content:
@@ -511,30 +550,92 @@ def send_embeds(embeds, content=None):
                 time.sleep(float(r.json().get("retry_after", 2)) + 0.5)
                 r = requests.post(WEBHOOK_URL, json=payload, timeout=15)
             if r.status_code in (200, 204):
-                print("Alert sent")
+                print("Message sent")
             else:
+                ok = False
                 print(f"Discord error {r.status_code}: {r.text[:200]}")
         except Exception as ex:
+            ok = False
             print(f"Discord send error: {ex}")
         time.sleep(1)
+    return ok
 
 
 # ======================================================
-# 5) MAIN SCAN
+# 5) TRACK HOW PAST ALERTS PERFORMED (so you see the real hit rate)
+# ======================================================
+def stats_line():
+    s = state["stats"]
+    if not s["n"]:
+        return "No 24h results yet."
+    return (f"24h record: {s['wins']}/{s['n']} positive ({s['wins']/s['n']*100:.0f}%) • "
+            f"avg {s['sum']/s['n']:+.0f}% • {s['x2']} hit 2x+")
+
+
+def track_results():
+    now = time.time()
+    due = []
+    for key, t in list(state["tracked"].items()):
+        for h in CHECKPOINTS_H:
+            if h not in t["reported"] and now - t["ts"] >= h * 3600:
+                due.append((key, t, h))
+                break
+        if now - t["ts"] > 72 * 3600:
+            state["tracked"].pop(key, None)
+    if not due:
+        return
+    pairs = fetch_pairs({(t["chain"], t["addr"]) for _, t, _ in due})
+    for key, t, h in due:
+        p = pairs.get(key)
+        if not p:
+            continue
+        price = num(p.get("priceUsd"))
+        liq = num((p.get("liquidity") or {}).get("usd"))
+        pulled = liq < 2000
+        change = -100.0 if pulled else ((price / t["price"] - 1) * 100 if t["price"] else 0)
+        t["reported"].append(h)
+        title = f"📊 {t['name']} (${t['symbol']}) — {h}h after alert: {change:+.0f}%"
+        if pulled:
+            title += " ⚠️ LIQUIDITY PULLED"
+        if h == CHECKPOINTS_H[-1]:
+            s = state["stats"]
+            s["n"] += 1
+            s["sum"] += change
+            s["wins"] += 1 if change > 0 else 0
+            s["x2"] += 1 if change >= 100 else 0
+            state["tracked"].pop(key, None)
+        send_embeds([{
+            "title": title,
+            "description": f"Alert price `${t['price']:.8g}` → now `${price:.8g}`\n`{t['addr']}`\n\n{stats_line()}",
+            "color": 0x2ECC71 if change > 0 else 0xE74C3C,
+        }])
+
+
+# ======================================================
+# 6) MAIN SCAN
 # ======================================================
 def check_for_tokens():
-    candidates = from_dexscreener_lists() | from_geckoterminal() | from_dexscreener_search()
+    state["scans"] += 1
+    sources = [from_dexscreener_lists(), from_geckoterminal(), from_dexscreener_search()]
+    candidates = set().union(*sources)
+    nsrc = {c: sum(1 for s in sources if c in s) for c in candidates}
     print(f"  {len(candidates)} candidate tokens")
     pairs = fetch_pairs(candidates)
     print(f"  {len(pairs)} pairs fetched")
 
     now = time.time()
+    for k in [k for k, v in state["rejected"].items() if now - v > 2 * 86400]:
+        state["rejected"].pop(k, None)
+
     results = []
     for key, pair in pairs.items():
-        if now - alerted.get(key, 0) < REALERT_AFTER or now - rejected.get(key, 0) < RECHECK_REJECTED_AFTER:
+        if now - state["alerted"].get(key, 0) < REALERT_AFTER:
             continue
-        ev = evaluate(pair)
-        if ev and ev[0] >= MIN_SCORE:
+        if now - state["rejected"].get(key, 0) < RECHECK_REJECTED_AFTER:
+            continue
+        chain, addr = key.split(":", 1)
+        ev = evaluate(pair, nsrc.get((chain, addr), 1))
+        if ev and ev[0] >= MIN_SCORE - 10:     # leave room for the narrative bonus/penalty
             results.append((ev[0], key, pair, ev[1]))
     results.sort(key=lambda x: x[0], reverse=True)
     print(f"  {len(results)} passed market filters")
@@ -545,14 +646,23 @@ def check_for_tokens():
             break
         checked += 1
         ok, reason, deep = deep_check(pair, d)
-        sym = (pair.get("baseToken") or {}).get("symbol")
+        base = pair.get("baseToken") or {}
+        sym = base.get("symbol")
+        if ok:
+            final = min(100, score + deep["bonus"])
+            if final < MIN_SCORE:
+                ok, reason = False, f"final score {final} below {MIN_SCORE}"
         if not ok:
-            rejected[key] = now
+            state["rejected"][key] = now
             print(f"  ✗ {sym}: {reason}")
             continue
-        print(f"  ✓ {sym}: passed everything")
-        alerted[key] = now
-        embeds.append(build_embed(pair, score, d, deep))
+        print(f"  ✓ {sym}: passed everything ({final})")
+        state["alerted"][key] = now
+        state["alerts"] += 1
+        state["tracked"][key] = {"symbol": sym, "name": base.get("name"), "chain": pair["chainId"],
+                                 "addr": base.get("address"), "price": num(pair.get("priceUsd")),
+                                 "ts": now, "reported": []}
+        embeds.append(build_embed(pair, final, d, deep))
         time.sleep(0.5)
 
     if embeds:
@@ -561,21 +671,40 @@ def check_for_tokens():
         print("  nothing passed all checks this round")
 
 
+def status_if_due():
+    now = time.time()
+    if now - state["last_status"] >= STATUS_EVERY:
+        state["last_status"] = now
+        send_embeds([{
+            "title": "✅ Scanner running",
+            "description": f"Scans: {state['scans']} • Alerts sent: {state['alerts']} • "
+                           f"Tracking: {len(state['tracked'])}\n{stats_line()}",
+            "color": 0x95A5A6,
+        }])
+
+
 if __name__ == "__main__":
-    if "PASTE_YOUR" in WEBHOOK_URL:
-        raise SystemExit("Set your Discord webhook URL first (DISCORD_WEBHOOK_URL env var or in the file).")
+    if not WEBHOOK_URL.startswith("https://discord.com/api/webhooks/"):
+        raise SystemExit("Invalid Discord webhook URL.")
     print("Memecoin scanner started...")
-    send_embeds([{
-        "title": "Memecoin scanner online",
-        "description": (f"Hunting early coins (40-240 min old) on Solana, Base, Ethereum & BSC every {CHECK_INTERVAL}s "
-                        f"(pump.fun, PumpSwap, Raydium, Meteora, Uniswap, PancakeSwap — everything Axiom, Fomo, "
-                        f"Photon, BullX etc. trade). AI coin reading: {'ON' if ANTHROPIC_API_KEY else 'OFF (keyword check only)'}."),
+    started = send_embeds([{
+        "title": "🟢 Memecoin scanner online",
+        "description": (f"Hunting early coins ({MIN_PAIR_AGE_MIN}-{MAX_PAIR_AGE_MIN} min old) on Solana, Base, Ethereum "
+                        f"& BSC every {CHECK_INTERVAL}s — everything pump.fun, Axiom, Fomo, Photon and BullX trade.\n"
+                        f"Checks: market momentum • rug/honeypot safety • copycat detection • narrative read.\n"
+                        f"Every alert is tracked and its real result is posted after 1h, 6h and 24h."),
         "color": 0x00FF99,
     }])
+    if not started:
+        raise SystemExit("Discord rejected the webhook. Check that the URL is correct and still exists.")
+    state["last_status"] = time.time()
     while True:
         print(f"[{datetime.now()}] Scanning...")
         try:
+            track_results()
             check_for_tokens()
+            status_if_due()
         except Exception as e:
             print(f"Scan error: {e}")
+        save_state()
         time.sleep(CHECK_INTERVAL)
