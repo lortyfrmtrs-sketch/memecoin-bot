@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 # ======================================================
 WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
 
+SEND_STATUS = False               # periodic 'scanner running' message (off = only calls)
+SEND_RESULT_UPDATES = True       # follow-up results on past calls (15m/1h/6h/24h)
 CHECK_INTERVAL = 60              # scan every minute, alerts are sent instantly
 REALERT_AFTER = 12 * 3600        # never repeat the same coin within 12 hours
 RECHECK_REJECTED_AFTER = 1800    # re-check a rejected coin after 30 minutes
@@ -19,24 +21,27 @@ STATUS_EVERY = 6 * 3600          # "bot is alive" status message interval
 # ---- Market filters (tuned for EARLY coins, ~1 hour old) ----
 MIN_PAIR_AGE_MIN = 20            # as early as possible (coins under 40 min are flagged EARLY / higher risk)
 MAX_PAIR_AGE_MIN = 240           # skip anything older than 4 hours (too late)
-MIN_LIQUIDITY_USD = 10_000
+MIN_LIQUIDITY_USD = 15_000
 MIN_VOLUME_24H = 25_000
 MIN_MARKET_CAP = 40_000
 MAX_MARKET_CAP = 5_000_000
-MIN_TXNS_24H = 150
+MIN_TXNS_24H = 250
 MIN_LIQ_TO_MCAP = 0.06
 MIN_BUY_SELL_RATIO_H1 = 1.2
 MAX_24H_PUMP_PCT = 800           # already ran too hard = too late
-MIN_SCORE = 70                   # final 0-100 score needed to alert
+MIN_SCORE = 75                   # final 0-100 score needed to alert
 
 # ---- Safety / authenticity filters ----
 REQUIRE_SAFETY_DATA = True       # if the safety checkers can't answer, skip the coin
-MAX_RUGCHECK_SCORE = 50
-MAX_TOP10_HOLDER_PCT = 60
-MIN_HOLDERS = 80
-MAX_INSIDERS_TOP10 = 2
+MAX_RUGCHECK_SCORE = 40
+MAX_TOP10_HOLDER_PCT = 50
+MIN_HOLDERS = 100
+MAX_INSIDERS_TOP10 = 1
 MAX_TAX_PCT = 10
-MIN_SOCIAL_LINKS = 1             # must have a website or social link
+MIN_SOCIAL_LINKS = 2             # must have a website or social link
+REQUIRE_WEBSITE_AND_SOCIAL = True  # legit projects have BOTH a website and a social account
+REQUIRE_LIVE_SITE = True         # the website must actually load
+MIN_LP_LOCKED_PCT = 50           # Solana: liquidity must be locked/burned (anti-rug)
 REQUIRE_NARRATIVE = True         # must have a description or a website
 
 CHAINS = {"solana", "base", "ethereum", "bsc"}
@@ -295,6 +300,9 @@ def rugcheck_solana(mint):
     lp_locked = 0
     for m in data.get("markets") or []:
         lp_locked = max(lp_locked, num((m.get("lp") or {}).get("lpLockedPct")))
+    lp_seen = any((m.get("lp") or {}) for m in data.get("markets") or [])
+    if lp_seen and lp_locked < MIN_LP_LOCKED_PCT:
+        reasons.append(f"only {lp_locked:.0f}% of liquidity locked/burned")
 
     meta = data.get("fileMeta") or {}
     desc, image = meta.get("description"), meta.get("image")
@@ -348,6 +356,14 @@ def fetch_site_blurb(url):
         return " — ".join(parts)[:400]
     except Exception:
         return ""
+
+
+def site_alive(url):
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=8, allow_redirects=True)
+        return r.status_code < 400 and len(r.text) > 200
+    except Exception:
+        return False
 
 
 def copycat_check(pair):
@@ -425,6 +441,10 @@ def deep_check(pair, d):
     socials = [s.get("url") for s in info.get("socials") or [] if s.get("url")]
     if len(sites) + len(socials) < MIN_SOCIAL_LINKS:
         return False, "no website/socials (can't verify it's real)", None
+    if REQUIRE_WEBSITE_AND_SOCIAL and (not sites or not socials):
+        return False, "needs both a website and a social account to count as legit", None
+    if REQUIRE_LIVE_SITE and sites and not site_alive(sites[0]):
+        return False, "website doesn't load (dead/fake)", None
 
     desc = (profile_desc.get(key) or safety.get("desc") or "").strip()
     site_blurb = fetch_site_blurb(sites[0]) if sites and len(desc) < 40 else ""
@@ -496,7 +516,10 @@ def build_embed(pair, score, d, deep):
         f"BUY/SELL  {d['ratio1']:.2f}x (1h)  {d['ratio5']:.2f}x (5m)\n"
         "```"
     )
-    desc = (f"{tier(score)}  •  {CHAIN_ICON.get(chain, '•')} **{chain.upper()}**  •  `{pair.get('dexId', '?')}`\n"
+    head = (f"**{base.get('name', '?')}** (${base.get('symbol', '?')})\n"
+            f"```{addr}```"
+            "*Hold to copy • paste into Fomo, Axiom or Photon search*\n\n")
+    desc = (head + f"{tier(score)}  •  {CHAIN_ICON.get(chain, '•')} **{chain.upper()}**  •  `{pair.get('dexId', '?')}`\n"
             f"`{score_bar(score)}`  **{score}/100**\n{stats}")
     if early:
         desc += "\n⚡ **EARLY ENTRY**: very young coin, higher risk. Keep size small."
@@ -508,8 +531,6 @@ def build_embed(pair, score, d, deep):
         {"name": "📝 What it's about", "value": trunc(about, 600), "inline": False},
         {"name": "🧭 Narrative", "value": trunc(deep["narr"], 250), "inline": False},
         {"name": "🛡️ Safety & authenticity", "value": trunc(safety_txt, 600), "inline": False},
-        {"name": "📋 Contract address (hold to copy, paste into Fomo / Axiom / Photon search)",
-         "value": f"```{addr}```", "inline": False},
         {"name": "⚡ Quick trade", "value": trunc(trade_links(pair), 1000), "inline": False},
     ]
     links = [f"[Website]({u})" for u in deep["sites"][:1]]
@@ -598,33 +619,7 @@ def send_startup():
             {"name": "📊 Accountability", "value": "Every call is tracked. Real results are posted 15m, 1h, 6h and 24h "
                                                    "after the alert, with a running win rate.", "inline": False},
         ],
-        "footer": {"text": f"{BOT_NAME} • first scan running now…"},
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }])
-
-
-def send_scan_report(summary):
-    misses = summary["misses"][:3]
-    if misses:
-        miss_txt = "\n".join(f"**{trunc(m[0], 24)}** (${trunc(m[1], 10)}) • {fmt_usd(m[2])}\n└ ❌ {trunc(m[3], 90)}"
-                             for m in misses)
-    else:
-        miss_txt = "Nothing close right now."
-    send_embeds([{
-        "author": {"name": BOT_NAME},
-        "title": "📡  FIRST SCAN COMPLETE",
-        "description": (
-            "```\n"
-            f"COINS FOUND          {summary['candidates']}\n"
-            f"PAIRS CHECKED        {summary['pairs']}\n"
-            f"PASSED MARKET RULES  {summary['passed_market']}\n"
-            f"CALLS SENT           {summary['alerts']}\n"
-            "```"
-            "Calls post here the instant a coin passes every check."
-        ),
-        "color": 0x3498DB,
-        "fields": [{"name": "🧪 Closest misses (blocked by safety / authenticity)", "value": miss_txt, "inline": False}],
-        "footer": {"text": BOT_NAME},
+        "footer": {"text": f"{BOT_NAME} • only passed coins are posted"},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }])
 
@@ -673,6 +668,8 @@ def track_results():
             s["wins"] += 1 if change > 0 else 0
             s["x2"] += 1 if change >= 100 else 0
             state["tracked"].pop(key, None)
+        if not SEND_RESULT_UPDATES:
+            continue
         icon = "🟢" if change > 0 else "🔴"
         send_embeds([{
             "author": {"name": f"{BOT_NAME}  •  📊 RESULT"},
@@ -747,7 +744,7 @@ def check_for_tokens():
                                  "ts": now, "reported": []}
         # sent immediately, no waiting for the rest of the scan
         send_embeds([build_embed(pair, final, d, deep)],
-                    content="🔥 **New call: passed every safety + authenticity check**")
+                    content=f"🚨 **{base.get('name')}** (${sym})  `{base.get('address')}`")
         summary["alerts"] += 1
 
     if not summary["alerts"]:
@@ -756,6 +753,8 @@ def check_for_tokens():
 
 
 def status_if_due():
+    if not SEND_STATUS:
+        return
     now = time.time()
     if now - state["last_status"] >= STATUS_EVERY:
         state["last_status"] = now
@@ -777,15 +776,11 @@ if __name__ == "__main__":
     print("Memecoin webhook bot started...")
     send_startup()
     state["last_status"] = time.time()
-    first_report_pending = True
     while True:
         print(f"[{datetime.now()}] Checking...")
         try:
             track_results()
-            summary = check_for_tokens()
-            if first_report_pending:
-                send_scan_report(summary)
-                first_report_pending = False
+            check_for_tokens()
             status_if_due()
         except Exception as e:
             print(f"Error: {e}")
