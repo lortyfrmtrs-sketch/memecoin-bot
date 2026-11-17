@@ -1,6 +1,7 @@
 import re
 import json
 import time
+import threading
 import requests
 from datetime import datetime, timezone
 
@@ -9,6 +10,17 @@ from datetime import datetime, timezone
 # ======================================================
 WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
 
+# ---- Live monitor (checks every 2 seconds) ----
+WATCH_EVERY = 2                  # seconds between live checks on coins being confirmed / already called
+CONFIRM_SECONDS = 90             # a coin must stay healthy this long under the live watch before it's called
+CONFIRM_MAX_LIQ_DROP = 0.10      # cancel the call if liquidity falls more than 10% while confirming
+CONFIRM_MAX_PRICE_DROP = 0.10    # cancel the call if price falls more than 10% while confirming
+MONITOR_HOURS = 6                # keep watching each called coin every 2s for this long
+EXIT_LIQ_DROP = 0.25             # EXIT alert if liquidity falls 25% from the call
+EXIT_PRICE_DROP = 0.30           # EXIT alert if price is 30% below the entry
+PEAK_PULLBACK = 0.20             # warn if price falls 20% from its peak after the call
+TAKE_PROFIT_X = (2, 3, 5, 10)    # take-profit alerts at these multiples
+MAX_VOL_TO_LIQ = 40              # volume/liquidity above this looks like wash trading
 SEND_STATUS = False               # periodic 'scanner running' message (off = only calls)
 SEND_RESULT_UPDATES = True       # follow-up results on past calls (15m/1h/6h/24h)
 CHECK_INTERVAL = 60              # scan every minute, alerts are sent instantly
@@ -19,7 +31,7 @@ MAX_DEEP_CHECKS_PER_SCAN = 15
 STATUS_EVERY = 6 * 3600          # "bot is alive" status message interval
 
 # ---- Market filters (tuned for EARLY coins, ~1 hour old) ----
-MIN_PAIR_AGE_MIN = 20            # as early as possible (coins under 40 min are flagged EARLY / higher risk)
+MIN_PAIR_AGE_MIN = 45            # skip the riskiest first 45 minutes (most rugs happen early)
 MAX_PAIR_AGE_MIN = 240           # skip anything older than 4 hours (too late)
 MIN_LIQUIDITY_USD = 15_000
 MIN_VOLUME_24H = 25_000
@@ -71,7 +83,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; scanner/3.0)", "Accept": "app
 DEX = "https://api.dexscreener.com"
 GECKO = "https://api.geckoterminal.com/api/v2"
 
-DEFAULT_STATE = {"alerted": {}, "rejected": {}, "tracked": {},
+DEFAULT_STATE = {"alerted": {}, "rejected": {}, "tracked": {}, "pending": {},
                  "stats": {"n": 0, "wins": 0, "sum": 0.0, "x2": 0},
                  "scans": 0, "alerts": 0, "last_status": 0}
 profile_desc = {}
@@ -220,6 +232,8 @@ def evaluate(pair, nsrc=1):
     if age_min is None or age_min < MIN_PAIR_AGE_MIN or age_min > MAX_PAIR_AGE_MIN:
         return None
     if (b24 + s24) < MIN_TXNS_24H or (mcap and liq / mcap < MIN_LIQ_TO_MCAP):
+        return None
+    if liq and vol24 / liq > MAX_VOL_TO_LIQ:   # wash-trading pattern
         return None
     if ch24 > MAX_24H_PUMP_PCT or ch1 < -5 or ch24 < -30:
         return None
@@ -541,7 +555,9 @@ def build_embed(pair, score, d, deep):
         fields.append({"name": "🌐 Official", "value": " • ".join(links[:5]), "inline": False})
     fields.append({"name": "🎯 Plan (not advice)",
                    "value": f"Entry ref `${price:.8g}` • Invalidation −30% `${price*0.7:.8g}`\n"
-                            f"Seen on {d['nsrc']} source(s). Size small, take profit in stages.",
+                            f"Seen on {d['nsrc']} source(s). Size small, take profit in stages.\n"
+                            f"📊 Bot track record: {stats_line()}\n"
+                            f"👁️ Watched every {WATCH_EVERY}s: EXIT and take-profit alerts follow.",
                    "inline": False})
 
     color = 0xF1C40F if early else (0x00FF99 if score >= 85 else (0x2ECC71 if score >= 78 else 0x3498DB))
@@ -607,7 +623,7 @@ def send_startup():
             "NETWORKS   Solana • Base • Ethereum • BSC\n"
             f"WINDOW     {MIN_PAIR_AGE_MIN}-{MAX_PAIR_AGE_MIN} min old coins\n"
             f"SCAN       every {CHECK_INTERVAL}s\n"
-            "ALERTS     instant, the moment a coin passes\n"
+            "WATCH      every 2s before + after each call\n"
             "```"
         ),
         "color": 0x00FF99,
@@ -625,18 +641,184 @@ def send_startup():
 
 
 # ======================================================
-# 5) TRACK HOW PAST ALERTS PERFORMED (so you see the real hit rate)
+# 5) LIVE MONITOR (every 2 seconds), EXIT / TAKE-PROFIT ALERTS & RESULTS
 # ======================================================
 def stats_line():
     s = state["stats"]
     if not s["n"]:
-        return "No 24h results yet."
-    return (f"24h record: {s['wins']}/{s['n']} positive ({s['wins']/s['n']*100:.0f}%) • "
+        return "No finished calls yet."
+    return (f"Record: {s['wins']}/{s['n']} positive ({s['wins']/s['n']*100:.0f}%) • "
             f"avg {s['sum']/s['n']:+.0f}% • {s['x2']} hit 2x+")
 
 
 def label_h(h):
     return f"{int(round(h * 60))}m" if h < 1 else f"{h:g}h"
+
+
+def finalize(key, change):
+    """Count a call in the track record once its outcome is known."""
+    t = state["tracked"].pop(key, None)
+    if not t:
+        return
+    s = state["stats"]
+    s["n"] += 1
+    s["sum"] += change
+    s["wins"] += 1 if change > 0 else 0
+    s["x2"] += 1 if change >= 100 else 0
+
+
+def fetch_pairs_fast(items):
+    """One lightweight request per chain, no sleeps (used by the 2-second monitor)."""
+    by_chain = {}
+    for chain, addr in items:
+        by_chain.setdefault(chain, []).append(addr)
+    best = {}
+    for chain, addrs in by_chain.items():
+        for i in range(0, len(addrs), 30):
+            data = get_json(f"{DEX}/tokens/v1/{chain}/{','.join(addrs[i:i + 30])}", retries=0, timeout=6)
+            if isinstance(data, list):
+                for p in data:
+                    addr = (p.get("baseToken") or {}).get("address")
+                    if not addr:
+                        continue
+                    key = f"{chain}:{addr}"
+                    liq = (p.get("liquidity") or {}).get("usd") or 0
+                    if key not in best or liq > ((best[key].get("liquidity") or {}).get("usd") or 0):
+                        best[key] = p
+    return best
+
+
+def live_embed(t, title, body, color, tag):
+    return {
+        "author": {"name": f"{BOT_NAME}  •  {tag}"},
+        "title": title,
+        "description": f"**{t['name']}** (${t['symbol']})\n```{t['addr']}```{body}",
+        "color": color,
+        "footer": {"text": BOT_NAME},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def fire_call(key, pair, final, d, deep):
+    now = time.time()
+    base = pair.get("baseToken") or {}
+    sym = base.get("symbol")
+    print(f"  ✓ {sym}: confirmed live, sending call ({final})")
+    state["alerted"][key] = now
+    state["alerts"] += 1
+    price = num(pair.get("priceUsd"))
+    state["tracked"][key] = {"symbol": sym, "name": base.get("name"), "chain": pair["chainId"],
+                             "addr": base.get("address"), "price": price, "liq0": d["liq"],
+                             "peak": price, "tp": [], "ts": now, "reported": []}
+    send_embeds([build_embed(pair, final, d, deep)],
+                content=f"🚨 **{base.get('name')}** (${sym})  `{base.get('address')}`")
+
+
+def check_pending(key, live, now):
+    """Pre-call confirmation: the coin must stay healthy while we watch it every 2 seconds."""
+    pend = state["pending"].get(key)
+    if not pend:
+        return
+    sym = (pend["pair"].get("baseToken") or {}).get("symbol")
+    if now - pend["t0"] > CONFIRM_SECONDS * 4:
+        state["pending"].pop(key, None)
+        return
+    if not live:
+        return
+    liq = num((live.get("liquidity") or {}).get("usd"))
+    price = num(live.get("priceUsd"))
+    if (pend["liq0"] and liq < pend["liq0"] * (1 - CONFIRM_MAX_LIQ_DROP)) or \
+       (pend["price0"] and price < pend["price0"] * (1 - CONFIRM_MAX_PRICE_DROP)):
+        state["pending"].pop(key, None)
+        state["rejected"][key] = now
+        print(f"  ✗ {sym}: failed live confirmation (liquidity/price dropping)")
+        return
+    if now - pend["t0"] < CONFIRM_SECONDS:
+        return
+    state["pending"].pop(key, None)
+    ev = evaluate(live, pend["nsrc"])
+    if not ev:
+        state["rejected"][key] = now
+        print(f"  ✗ {sym}: no longer passes market rules after confirmation")
+        return
+    final = min(100, ev[0] + pend["deep"]["bonus"])
+    if final < MIN_SCORE:
+        state["rejected"][key] = now
+        print(f"  ✗ {sym}: final score {final} below {MIN_SCORE} after confirmation")
+        return
+    fire_call(key, live, final, ev[1], pend["deep"])
+
+
+def check_called(key, t, live):
+    """Post-call watch: EXIT alert on liquidity pull / dump, take-profit alerts, pullback warning."""
+    if not live or not t.get("price"):
+        return
+    entry = t["price"]
+    price = num(live.get("priceUsd"))
+    liq = num((live.get("liquidity") or {}).get("usd"))
+    t["peak"] = max(t.get("peak", entry), price)
+    change = (price / entry - 1) * 100
+    liq_drop = (1 - liq / t["liq0"]) if t.get("liq0") else 0
+    rugged = liq < 2000 or liq_drop >= 0.6
+
+    if not t.get("exit_sent") and (rugged or liq_drop >= EXIT_LIQ_DROP or price <= entry * (1 - EXIT_PRICE_DROP)):
+        t["exit_sent"] = True
+        why = "LIQUIDITY BEING PULLED" if (rugged or liq_drop >= EXIT_LIQ_DROP) else f"PRICE DOWN {abs(change):.0f}% FROM ENTRY"
+        send_embeds([live_embed(
+            t, f"🚨 EXIT NOW: {t['name']} (${t['symbol']})",
+            f"**{why}**\n```\nENTRY  ${entry:.8g}\nNOW    ${price:.8g}  ({change:+.0f}%)\n"
+            f"LIQ    {fmt_usd(liq)}  ({-liq_drop * 100:+.0f}% vs call)\n```",
+            0xE74C3C, "🚨 EXIT ALERT")],
+            content=f"🚨 **EXIT: {t['name']}** (${t['symbol']})  `{t['addr']}`")
+        if rugged:
+            finalize(key, -100.0)
+        return
+
+    for x in TAKE_PROFIT_X:
+        if price >= entry * x and x not in t.setdefault("tp", []):
+            t["tp"].append(x)
+            send_embeds([live_embed(
+                t, f"💰 TAKE PROFIT: {t['name']} is {x}x",
+                f"```\nENTRY  ${entry:.8g}\nNOW    ${price:.8g}  ({change:+.0f}%)\n```"
+                "Consider selling part (e.g. your initial amount) and letting the rest ride.",
+                0xF1C40F, "💰 TAKE PROFIT")],
+                content=f"💰 **{x}x: {t['name']}** (${t['symbol']})  `{t['addr']}`")
+
+    peak_gain = (t["peak"] / entry - 1) * 100
+    if peak_gain >= 20 and not t.get("pullback_sent") and price <= t["peak"] * (1 - PEAK_PULLBACK):
+        t["pullback_sent"] = True
+        send_embeds([live_embed(
+            t, f"⚠️ PULLBACK: {t['name']} is down {PEAK_PULLBACK * 100:.0f}% from its peak",
+            f"```\nPEAK   ${t['peak']:.8g}  ({peak_gain:+.0f}% vs entry)\nNOW    ${price:.8g}  ({change:+.0f}%)\n```"
+            "Momentum is fading. Consider securing profit.",
+            0xE67E22, "⚠️ PULLBACK")])
+
+
+def monitor_once():
+    now = time.time()
+    watch = {}
+    for key, pend in list(state["pending"].items()):
+        watch[key] = (pend["chain"], pend["addr"])
+    for key, t in list(state["tracked"].items()):
+        if now - t["ts"] <= MONITOR_HOURS * 3600:
+            watch[key] = (t["chain"], t["addr"])
+    if not watch:
+        return
+    live = fetch_pairs_fast(watch.values())
+    for key in list(state["pending"].keys()):
+        check_pending(key, live.get(key), now)
+    for key, t in list(state["tracked"].items()):
+        if key in watch:
+            check_called(key, t, live.get(key))
+
+
+def monitor_loop():
+    while True:
+        try:
+            monitor_once()
+        except Exception as e:
+            print(f"Monitor error: {e}")
+        time.sleep(WATCH_EVERY)
 
 
 def track_results():
@@ -661,13 +843,8 @@ def track_results():
         pulled = liq < 2000
         change = -100.0 if pulled else ((price / t["price"] - 1) * 100 if t["price"] else 0)
         t["reported"].append(h)
-        if h == CHECKPOINTS_H[-1]:
-            s = state["stats"]
-            s["n"] += 1
-            s["sum"] += change
-            s["wins"] += 1 if change > 0 else 0
-            s["x2"] += 1 if change >= 100 else 0
-            state["tracked"].pop(key, None)
+        if h == CHECKPOINTS_H[-1] or pulled:
+            finalize(key, change)
         if not SEND_RESULT_UPDATES:
             continue
         icon = "🟢" if change > 0 else "🔴"
@@ -700,12 +877,12 @@ def check_for_tokens():
     print(f"  {len(pairs)} pairs fetched")
 
     now = time.time()
-    for k in [k for k, v in state["rejected"].items() if now - v > 2 * 86400]:
+    for k in [k for k, v in list(state["rejected"].items()) if now - v > 2 * 86400]:
         state["rejected"].pop(k, None)
 
     results = []
     for key, pair in pairs.items():
-        if now - state["alerted"].get(key, 0) < REALERT_AFTER:
+        if key in state["pending"] or now - state["alerted"].get(key, 0) < REALERT_AFTER:
             continue
         if now - state["rejected"].get(key, 0) < RECHECK_REJECTED_AFTER:
             continue
@@ -716,11 +893,10 @@ def check_for_tokens():
     results.sort(key=lambda x: x[0], reverse=True)
     print(f"  {len(results)} passed market filters")
 
-    summary = {"candidates": len(candidates), "pairs": len(pairs), "passed_market": len(results),
-               "alerts": 0, "misses": []}
+    summary = {"candidates": len(candidates), "pairs": len(pairs), "passed_market": len(results), "queued": 0}
     checked = 0
     for score, key, pair, d in results:
-        if summary["alerts"] >= MAX_ALERTS_PER_SCAN or checked >= MAX_DEEP_CHECKS_PER_SCAN:
+        if checked >= MAX_DEEP_CHECKS_PER_SCAN:
             break
         checked += 1
         ok, reason, deep = deep_check(pair, d)
@@ -733,21 +909,15 @@ def check_for_tokens():
                 ok, reason = False, f"final score {final} below {MIN_SCORE}"
         if not ok:
             state["rejected"][key] = now
-            summary["misses"].append((base.get("name") or "?", sym or "?", d["mcap"], reason))
             print(f"  ✗ {sym}: {reason}")
             continue
-        print(f"  ✓ {sym}: passed everything ({final})")
-        state["alerted"][key] = now
-        state["alerts"] += 1
-        state["tracked"][key] = {"symbol": sym, "name": base.get("name"), "chain": pair["chainId"],
-                                 "addr": base.get("address"), "price": num(pair.get("priceUsd")),
-                                 "ts": now, "reported": []}
-        # sent immediately, no waiting for the rest of the scan
-        send_embeds([build_embed(pair, final, d, deep)],
-                    content=f"🚨 **{base.get('name')}** (${sym})  `{base.get('address')}`")
-        summary["alerts"] += 1
-
-    if not summary["alerts"]:
+        # passed every static check: now it must stay healthy under the 2-second live watch before it is called
+        print(f"  … {sym}: passed all checks, confirming live for {CONFIRM_SECONDS}s")
+        state["pending"][key] = {"chain": pair["chainId"], "addr": base.get("address"), "pair": pair,
+                                 "deep": deep, "nsrc": d["nsrc"], "t0": now, "liq0": d["liq"],
+                                 "price0": num(pair.get("priceUsd"))}
+        summary["queued"] += 1
+    if not summary["queued"]:
         print("  nothing passed all checks this round")
     return summary
 
@@ -776,6 +946,7 @@ if __name__ == "__main__":
     print("Memecoin webhook bot started...")
     send_startup()
     state["last_status"] = time.time()
+    threading.Thread(target=monitor_loop, daemon=True).start()   # live watch every 2 seconds
     while True:
         print(f"[{datetime.now()}] Checking...")
         try:
