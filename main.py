@@ -1,3 +1,4 @@
+import os
 import re
 import json
 import time
@@ -8,29 +9,30 @@ from datetime import datetime, timezone
 # ======================================================
 # CONFIGURATION
 # ======================================================
-WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
+BOT_NAME = "Valk's Insider Bot"
+CREDIT = "Created by @valk_ on Fomo"
+VERSION = "3.0.0"                # bump this when you add something new, it posts to the Updates channel
 
-# ---- Live monitor (checks every 2 seconds) ----
-WATCH_EVERY = 2                  # seconds between live checks on coins being confirmed / already called
-CONFIRM_SECONDS = 90             # a coin must stay healthy this long under the live watch before it's called
-CONFIRM_MAX_LIQ_DROP = 0.10      # cancel the call if liquidity falls more than 10% while confirming
-CONFIRM_MAX_PRICE_DROP = 0.10    # cancel the call if price falls more than 10% while confirming
-MONITOR_HOURS = 6                # keep watching each called coin every 2s for this long
-EXIT_LIQ_DROP = 0.25             # EXIT alert if liquidity falls 25% from the call
-EXIT_PRICE_DROP = 0.30           # EXIT alert if price is 30% below the entry
-PEAK_PULLBACK = 0.20             # warn if price falls 20% from its peak after the call
-TAKE_PROFIT_X = (2, 3, 5, 10)    # take-profit alerts at these multiples
-MAX_VOL_TO_LIQ = 40              # volume/liquidity above this looks like wash trading
-SEND_STATUS = False               # periodic 'scanner running' message (off = only calls)
-SEND_RESULT_UPDATES = True       # follow-up results on past calls (15m/1h/6h/24h)
-CHECK_INTERVAL = 60              # scan every minute, alerts are sent instantly
+# ---- Discord webhooks (keep this file PRIVATE: anyone holding these URLs can post in your channels) ----
+WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
+WEBHOOKS = {
+    "callouts": WEBHOOK_URL,   # original callouts, results, startup
+    "legit":    "https://discord.com/api/webhooks/1572179140071788584/VkNt0IGCHgf4n5VQIcZpVdkV2SVbSyL-kQiqhW-9LUP0_EZoyOIJPLEbb7zGdGv4ByQn",
+    "exit":     "https://discord.com/api/webhooks/1572181849743163534/EOfiZofRjTm7tMfB_c6dSqAZX33Q25aCNVuFwzzyoi-mOXsrDalgM3G0g7SgvoaOjyYC",
+    "profit":   "https://discord.com/api/webhooks/1572181743602241628/hyY_K931H6dEC8NTd5N5yIuy8ulXok3P9WDXzSVAhsPvozGCILgVSl8_8CoUoCTOWVaq",
+    "updates":  "https://discord.com/api/webhooks/1572187465547255898/zl1XiPtRaCXFylwk84rqllawjUsRTngaY4wFh6Y2uRYsBh1y6cbmwdOIILvTOwnLfCYO",
+}
+
+CHECK_INTERVAL = 60              # seconds between scans
 REALERT_AFTER = 12 * 3600        # never repeat the same coin within 12 hours
 RECHECK_REJECTED_AFTER = 1800    # re-check a rejected coin after 30 minutes
-MAX_ALERTS_PER_SCAN = 4
-MAX_DEEP_CHECKS_PER_SCAN = 15
-STATUS_EVERY = 6 * 3600          # "bot is alive" status message interval
+MAX_DEEP_CHECKS_PER_SCAN = 20    # how many top candidates get the full health check per scan
+STATUS_EVERY = 6 * 3600
+SEND_STATUS = False              # periodic "scanner running" message (off = only calls)
+SEND_RESULT_UPDATES = True       # follow-up results on past calls (15m / 1h / 6h / 24h)
+VERSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".bot_version")
 
-# ---- Market filters (tuned for EARLY coins, ~1 hour old) ----
+# ---- Bullish filters (market) ----
 MIN_PAIR_AGE_MIN = 45            # skip the riskiest first 45 minutes (most rugs happen early)
 MAX_PAIR_AGE_MIN = 240           # skip anything older than 4 hours (too late)
 MIN_LIQUIDITY_USD = 15_000
@@ -41,26 +43,46 @@ MIN_TXNS_24H = 250
 MIN_LIQ_TO_MCAP = 0.06
 MIN_BUY_SELL_RATIO_H1 = 1.2
 MAX_24H_PUMP_PCT = 800           # already ran too hard = too late
-MIN_SCORE = 75                   # final 0-100 score needed to alert
+MAX_VOL_TO_LIQ = 40              # volume / liquidity above this looks like wash trading
+MIN_SCORE = 75                   # final bullish score (0-100) needed to be called
 
-# ---- Safety / authenticity filters ----
-REQUIRE_SAFETY_DATA = True       # if the safety checkers can't answer, skip the coin
-MAX_RUGCHECK_SCORE = 40
+# ---- Legit filters (health check) ----
+MIN_LEGIT_SCORE = 75             # final legit score (0-100) needed to be called
+MAX_RUGCHECK_SCORE = 40          # Solana: reject above this RugCheck risk score
 MAX_TOP10_HOLDER_PCT = 50
 MIN_HOLDERS = 100
-MAX_INSIDERS_TOP10 = 1
-MAX_TAX_PCT = 10
-MIN_SOCIAL_LINKS = 2             # must have a website or social link
-REQUIRE_WEBSITE_AND_SOCIAL = True  # legit projects have BOTH a website and a social account
-REQUIRE_LIVE_SITE = True         # the website must actually load
-MIN_LP_LOCKED_PCT = 50           # Solana: liquidity must be locked/burned (anti-rug)
-REQUIRE_NARRATIVE = True         # must have a description or a website
+MAX_INSIDERS_TOP10 = 1           # max insider / linked wallets among the top 10
+MAX_CREATOR_PCT = 10             # max % of supply the creator may still hold
+MAX_TRANSFER_FEE_PCT = 5
+MIN_LP_LOCKED_PCT = 50           # Solana: liquidity must be locked / burned
+MAX_TAX_PCT = 10                 # EVM: max buy/sell tax
+MIN_SOCIAL_LINKS = 2
+REQUIRE_WEBSITE_AND_SOCIAL = True
+REQUIRE_LIVE_SITE = True
+REQUIRE_NARRATIVE = True
+MIN_DESC_LEN = 30                # the bot must be able to read what the coin is about
+REQUIRE_SAFETY_DATA = True       # if a checker can't answer, skip the coin
+
+# ---- Live monitor (every 2 seconds) ----
+WATCH_EVERY = 2
+CONFIRM_SECONDS = 90             # a coin must stay healthy this long under the live watch before it's called
+CONFIRM_MAX_LIQ_DROP = 0.10
+CONFIRM_MAX_PRICE_DROP = 0.10
+MONITOR_HOURS = 6                # keep watching each called coin every 2s for this long
+EXIT_LIQ_DROP = 0.25             # EXIT alert if liquidity falls 25% from the call
+EXIT_PRICE_DROP = 0.30           # EXIT alert if price is 30% below the entry
+PEAK_PULLBACK = 0.20             # warn if price falls 20% from its peak after the call
+TAKE_PROFIT_X = (2, 3, 5, 10)
+CHECKPOINTS_H = (0.25, 1, 6, 24)
 
 CHAINS = {"solana", "base", "ethereum", "bsc"}
 GECKO_NETWORKS = {"solana": "solana", "base": "base", "eth": "ethereum", "bsc": "bsc"}
+GECKO_NEW_PAGES = {"solana": 5, "base": 2, "eth": 2, "bsc": 2}
 GOPLUS_CHAIN = {"ethereum": "1", "bsc": "56", "base": "8453"}
 GMGN_CHAIN = {"solana": "sol", "base": "base", "ethereum": "eth", "bsc": "bsc"}
-CHECKPOINTS_H = (0.25, 1, 6, 24)  # report how past alerts performed: 15m, 1h, 6h, 24h
+CHAIN_ICON = {"solana": "◎", "base": "🔵", "ethereum": "⟠", "bsc": "🟡"}
+SEARCH_TERMS = ("pump", "pumpfun", "meme", "pepe", "dog", "cat", "ai agent", "trump", "bonk", "frog",
+                "moon", "inu", "elon", "wojak", "chad", "baby", "king", "cult", "goat", "sol")
 
 RED_WORDS = [
     "guaranteed", "risk free", "risk-free", "no risk", "can't lose", "cant lose", "presale",
@@ -82,14 +104,13 @@ THEMES = {
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; scanner/3.0)", "Accept": "application/json"}
 DEX = "https://api.dexscreener.com"
 GECKO = "https://api.geckoterminal.com/api/v2"
+FOOTER = f"{BOT_NAME} • {CREDIT}"
 
 DEFAULT_STATE = {"alerted": {}, "rejected": {}, "tracked": {}, "pending": {},
                  "stats": {"n": 0, "wins": 0, "sum": 0.0, "x2": 0},
                  "scans": 0, "alerts": 0, "last_status": 0}
+state = json.loads(json.dumps(DEFAULT_STATE))   # kept in memory while the bot runs
 profile_desc = {}
-
-
-state = json.loads(json.dumps(DEFAULT_STATE))  # kept in memory while the bot runs
 
 
 # ======================================================
@@ -136,6 +157,11 @@ def fmt_age(m):
     return f"{m/1440:.1f}d"
 
 
+def score_bar(score, n=10):
+    filled = max(0, min(n, round(score / 100 * n)))
+    return "█" * filled + "░" * (n - filled)
+
+
 # ======================================================
 # 1) FIND COINS (everything pump.fun / Axiom / Fomo / Photon / BullX etc. can trade)
 # ======================================================
@@ -158,7 +184,8 @@ def from_dexscreener_lists():
 def from_geckoterminal():
     found = set()
     for net, chain in GECKO_NETWORKS.items():
-        for kind, page in (("trending_pools", 1), ("new_pools", 1), ("new_pools", 2), ("new_pools", 3)):
+        jobs = [("trending_pools", 1)] + [("new_pools", pg) for pg in range(1, GECKO_NEW_PAGES[net] + 1)]
+        for kind, page in jobs:
             data = get_json(f"{GECKO}/networks/{net}/{kind}", params={"page": page})
             if not data:
                 continue
@@ -174,7 +201,7 @@ def from_geckoterminal():
 
 def from_dexscreener_search():
     found = set()
-    for q in ("pump", "pumpfun", "meme", "pepe", "dog", "cat", "ai agent", "trump", "bonk", "frog"):
+    for q in SEARCH_TERMS:
         data = get_json(f"{DEX}/latest/dex/search", params={"q": q})
         if data:
             for p in data.get("pairs", []) or []:
@@ -182,19 +209,19 @@ def from_dexscreener_search():
                 addr = (p.get("baseToken") or {}).get("address")
                 if chain in CHAINS and addr:
                     found.add((chain, addr))
-        time.sleep(0.5)
+        time.sleep(0.4)
     return found
 
 
-def fetch_pairs(candidates):
+def fetch_pairs(candidates, pause=0.4):
     by_chain = {}
     for chain, addr in candidates:
         by_chain.setdefault(chain, []).append(addr)
     best = {}
     for chain, addrs in by_chain.items():
         for i in range(0, len(addrs), 30):
-            chunk = addrs[i:i + 30]
-            data = get_json(f"{DEX}/tokens/v1/{chain}/{','.join(chunk)}")
+            data = get_json(f"{DEX}/tokens/v1/{chain}/{','.join(addrs[i:i + 30])}",
+                            retries=2 if pause else 0, timeout=15 if pause else 6)
             if isinstance(data, list):
                 for p in data:
                     addr = (p.get("baseToken") or {}).get("address")
@@ -204,12 +231,13 @@ def fetch_pairs(candidates):
                     liq = (p.get("liquidity") or {}).get("usd") or 0
                     if key not in best or liq > ((best[key].get("liquidity") or {}).get("usd") or 0):
                         best[key] = p
-            time.sleep(0.4)
+            if pause:
+                time.sleep(pause)
     return best
 
 
 # ======================================================
-# 2) MARKET FILTER + MOMENTUM SCORE
+# 2) BULLISH CHECK: market filter + momentum score
 # ======================================================
 def evaluate(pair, nsrc=1):
     liq = num((pair.get("liquidity") or {}).get("usd"))
@@ -259,7 +287,7 @@ def evaluate(pair, nsrc=1):
     info = pair.get("info") or {}
     score += 4 if info.get("socials") else 0
     score += 4 if info.get("websites") else 0
-    score += 10 if 30 <= age_min <= 120 else (5 if age_min <= 240 else 0)   # sweet spot ~1h old
+    score += 10 if 60 <= age_min <= 150 else (5 if age_min <= 240 else 0)   # sweet spot ~1-2h old
     score += min(10, (nsrc - 1) * 5)                          # seen on several sources
 
     return min(100, round(score)), {
@@ -269,7 +297,7 @@ def evaluate(pair, nsrc=1):
 
 
 # ======================================================
-# 3) SAFETY, AUTHENTICITY & NARRATIVE
+# 3) LEGIT CHECK: contract, liquidity, holders, bundles, project, copycats
 # ======================================================
 def fetch_ipfs_json(uri):
     if not uri:
@@ -280,41 +308,69 @@ def fetch_ipfs_json(uri):
 
 
 def rugcheck_solana(mint):
+    """Solana health data from RugCheck: authorities, LP lock, holders, creator, insiders/bundles, risks."""
     data = get_json(f"https://api.rugcheck.xyz/v1/tokens/{mint}/report")
     if not data:
-        return {"ok": not REQUIRE_SAFETY_DATA, "note": "RugCheck unavailable"}
+        return {"ok": False, "reasons": ["RugCheck unavailable"], "facts": None, "desc": "", "image": ""}
 
     reasons = []
+    risks = data.get("risks") or []
+    danger = [r.get("name", "?") for r in risks if str(r.get("level", "")).lower() == "danger"]
+    warn = [r.get("name", "?") for r in risks if str(r.get("level", "")).lower() == "warn"]
     if data.get("rugged"):
         reasons.append("already rugged")
-    danger = [r.get("name", "?") for r in (data.get("risks") or []) if str(r.get("level", "")).lower() == "danger"]
     if danger:
         reasons.append("danger: " + ", ".join(danger[:3]))
-    score = data.get("score_normalised")
-    if score is not None and num(score) > MAX_RUGCHECK_SCORE:
-        reasons.append(f"risk score {score}")
-    if data.get("mintAuthority"):
+    raw_score = data.get("score_normalised")
+    risk_score = num(raw_score) if raw_score is not None else None
+    if risk_score is not None and risk_score > MAX_RUGCHECK_SCORE:
+        reasons.append(f"risk score {risk_score:.0f}")
+
+    mint_ren = not data.get("mintAuthority")
+    freeze_ren = not data.get("freezeAuthority")
+    if not mint_ren:
         reasons.append("mint authority NOT renounced")
-    if data.get("freezeAuthority"):
+    if not freeze_ren:
         reasons.append("freeze authority NOT renounced")
 
     holders = data.get("topHolders") or []
     top10 = sum(num(h.get("pct")) for h in holders[:10])
+    top1 = num(holders[0].get("pct")) if holders else 0.0
     if top10 > MAX_TOP10_HOLDER_PCT:
         reasons.append(f"top 10 hold {top10:.0f}%")
     insiders = sum(1 for h in holders[:10] if h.get("insider"))
     if insiders > MAX_INSIDERS_TOP10:
         reasons.append(f"{insiders} insider/linked wallets in top 10")
-    if num(data.get("graphInsidersDetected")) > 0:
+    insider_network = num(data.get("graphInsidersDetected")) > 0 or bool(data.get("insiderNetworks"))
+    if insider_network:
         reasons.append("insider network detected")
+    bundle_flags = [n for n in danger + warn if re.search(r"bundl|snip|insider|cluster", n, re.I)]
+    if bundle_flags and not insider_network:
+        reasons.append("bundle/sniper flag: " + ", ".join(bundle_flags[:2]))
+
     total_holders = int(num(data.get("totalHolders")))
     if total_holders and total_holders < MIN_HOLDERS:
         reasons.append(f"only {total_holders} holders")
 
-    lp_locked = 0
+    creator_pct = None
+    supply = num((data.get("token") or {}).get("supply"))
+    if supply and data.get("creatorBalance") is not None:
+        pct = num(data.get("creatorBalance")) / supply * 100
+        if 0 <= pct <= 100:
+            creator_pct = pct
+    if creator_pct is not None and creator_pct > MAX_CREATOR_PCT:
+        reasons.append(f"creator still holds {creator_pct:.0f}%")
+
+    tf = num((data.get("transferFee") or {}).get("pct")) if isinstance(data.get("transferFee"), dict) else 0.0
+    if tf > MAX_TRANSFER_FEE_PCT:
+        reasons.append(f"transfer fee {tf:.0f}%")
+
+    lp_locked, lp_seen = 0.0, False
     for m in data.get("markets") or []:
-        lp_locked = max(lp_locked, num((m.get("lp") or {}).get("lpLockedPct")))
-    lp_seen = any((m.get("lp") or {}) for m in data.get("markets") or [])
+        lp = m.get("lp") or {}
+        if lp:
+            lp_seen = True
+            lp_locked = max(lp_locked, num(lp.get("lpLockedPct")))
     if lp_seen and lp_locked < MIN_LP_LOCKED_PCT:
         reasons.append(f"only {lp_locked:.0f}% of liquidity locked/burned")
 
@@ -324,26 +380,29 @@ def rugcheck_solana(mint):
         uri_meta = fetch_ipfs_json((data.get("tokenMeta") or {}).get("uri"))
         desc, image = uri_meta.get("description"), image or uri_meta.get("image")
 
-    warn = [r.get("name", "?") for r in (data.get("risks") or []) if str(r.get("level", "")).lower() == "warn"]
-    note = "Clean ✅" if not warn else "Warnings: " + ", ".join(warn[:3])
-    note += f" • Top10: {top10:.0f}% • Holders: {total_holders or '?'} • LP locked: {lp_locked:.0f}% • Mint/Freeze renounced"
-    return {"ok": not reasons, "note": "; ".join(reasons) if reasons else note,
-            "desc": desc or "", "image": image or ""}
+    facts = {"mint_ren": mint_ren, "freeze_ren": freeze_ren, "lp_locked": lp_locked if lp_seen else None,
+             "holders": total_holders, "top10": top10, "top1": top1, "creator_pct": creator_pct,
+             "insiders": insiders, "insider_network": insider_network, "bundle_flags": bundle_flags,
+             "risk_score": risk_score, "transfer_fee": tf, "warnings": warn}
+    return {"ok": not reasons, "reasons": reasons, "facts": facts, "desc": desc or "", "image": image or ""}
 
 
 def goplus_check(chain, addr):
+    """Ethereum / Base / BSC health data from GoPlus: honeypot, taxes, ownership, holders, LP lock."""
     data = get_json(f"https://api.gopluslabs.io/api/v1/token_security/{GOPLUS_CHAIN[chain]}",
                     params={"contract_addresses": addr})
     res = ((data or {}).get("result") or {}).get(addr.lower())
     if not res:
-        return {"ok": not REQUIRE_SAFETY_DATA, "note": "GoPlus unavailable"}
+        return {"ok": False, "reasons": ["GoPlus unavailable"], "facts": None, "desc": "", "image": ""}
 
     reasons = []
+    buy, sell = num(res.get("buy_tax")) * 100, num(res.get("sell_tax")) * 100
     if res.get("is_honeypot") == "1":
         reasons.append("HONEYPOT")
-    if num(res.get("buy_tax")) * 100 > MAX_TAX_PCT or num(res.get("sell_tax")) * 100 > MAX_TAX_PCT:
-        reasons.append(f"tax {num(res.get('buy_tax'))*100:.0f}%/{num(res.get('sell_tax'))*100:.0f}%")
-    if res.get("is_open_source") == "0":
+    if buy > MAX_TAX_PCT or sell > MAX_TAX_PCT:
+        reasons.append(f"tax {buy:.0f}%/{sell:.0f}%")
+    open_source = res.get("is_open_source") != "0"
+    if not open_source:
         reasons.append("unverified contract")
     for k, label in (("hidden_owner", "hidden owner"), ("can_take_back_ownership", "ownership reclaimable"),
                      ("owner_change_balance", "owner can change balances"), ("is_blacklisted", "blacklist function"),
@@ -354,10 +413,20 @@ def goplus_check(chain, addr):
     holders = int(num(res.get("holder_count")))
     if holders < MIN_HOLDERS:
         reasons.append(f"only {holders} holders")
-    return {"ok": not reasons,
-            "note": "; ".join(reasons) if reasons else
-            f"Clean ✅ • Holders: {holders} • Tax {num(res.get('buy_tax'))*100:.0f}%/{num(res.get('sell_tax'))*100:.0f}%",
-            "desc": "", "image": ""}
+    creator = num(res.get("creator_percent")) * 100
+    if creator > MAX_CREATOR_PCT:
+        reasons.append(f"creator holds {creator:.0f}%")
+    top = [h for h in (res.get("holders") or [])[:10] if str(h.get("is_contract")) != "1"]
+    top10 = sum(num(h.get("percent")) * 100 for h in top)
+    if top10 > MAX_TOP10_HOLDER_PCT:
+        reasons.append(f"top wallets hold {top10:.0f}%")
+    lp_locked = sum(num(h.get("percent")) * 100 for h in (res.get("lp_holders") or []) if str(h.get("is_locked")) == "1")
+    owner = (res.get("owner_address") or "").lower()
+    owner_ren = owner in ("", "0x0000000000000000000000000000000000000000", "0x000000000000000000000000000000000000dead")
+
+    facts = {"buy_tax": buy, "sell_tax": sell, "open_source": open_source, "owner_ren": owner_ren,
+             "holders": holders, "top10": top10, "creator_pct": creator, "lp_locked": lp_locked}
+    return {"ok": not reasons, "reasons": reasons, "facts": facts, "desc": "", "image": ""}
 
 
 def fetch_site_blurb(url):
@@ -436,15 +505,70 @@ def read_coin(name, symbol, desc, site_blurb):
     return " • ".join(bits), bonus
 
 
+def build_legit(chain, f, extra):
+    """Legit score (0-100) + the report lines: (icon, label, value, group)."""
+    s = 0
+    lines = []
+
+    def item(group, label, val, got, mx):
+        nonlocal s
+        s += got
+        lines.append(("✅" if got >= mx * 0.7 else "⚠️", label, val, group))
+
+    if chain == "solana":
+        lp = f["lp_locked"]
+        item("contract", "Mint authority", "renounced" if f["mint_ren"] else "NOT renounced", 10 if f["mint_ren"] else 0, 10)
+        item("contract", "Freeze authority", "renounced" if f["freeze_ren"] else "NOT renounced", 10 if f["freeze_ren"] else 0, 10)
+        item("contract", "Liquidity locked/burned", "n/a" if lp is None else f"{lp:.0f}%",
+             5 if lp is None else (15 if lp >= 95 else 10 if lp >= 70 else 5 if lp >= 50 else 0), 15)
+        rs = f["risk_score"]
+        item("contract", "RugCheck risk score", "n/a" if rs is None else f"{rs:.0f}/100 (lower is safer)",
+             5 if rs is None else (10 if rs <= 10 else 7 if rs <= 25 else 3 if rs <= 40 else 0), 10)
+        lines.append(("✅" if f["transfer_fee"] <= 1 else "⚠️", "Transfer fee", f"{f['transfer_fee']:.0f}%", "contract"))
+        h = f["holders"]
+        item("holders", "Holders", str(h), 10 if h >= 500 else 7 if h >= 250 else 4 if h >= 100 else 0, 10)
+        t10 = f["top10"]
+        item("holders", "Top 10 wallets", f"{t10:.0f}% (largest {f['top1']:.0f}%)", 10 if t10 <= 25 else 7 if t10 <= 35 else 3 if t10 <= 50 else 0, 10)
+        cp = f["creator_pct"]
+        item("holders", "Creator holding", "n/a" if cp is None else f"{cp:.1f}%",
+             5 if cp is None else (10 if cp <= 2 else 7 if cp <= 5 else 3 if cp <= 10 else 0), 10)
+        ins = f["insiders"] + (1 if f["insider_network"] else 0) + len(f["bundle_flags"])
+        item("holders", "Insiders / bundles", "none detected" if ins == 0 else f"{ins} flagged", 10 if ins == 0 else 4 if ins == 1 else 0, 10)
+        if f["warnings"]:
+            lines.append(("⚠️", "RugCheck warnings", ", ".join(f["warnings"][:3]), "contract"))
+    else:
+        tax = max(f["buy_tax"], f["sell_tax"])
+        item("contract", "Honeypot test", "passed (can sell)", 15, 15)
+        item("contract", "Buy / sell tax", f"{f['buy_tax']:.0f}% / {f['sell_tax']:.0f}%", 10 if tax <= 3 else 5 if tax <= 10 else 0, 10)
+        item("contract", "Contract source", "verified" if f["open_source"] else "unverified", 10 if f["open_source"] else 0, 10)
+        item("contract", "Ownership", "renounced" if f["owner_ren"] else "owner active", 10 if f["owner_ren"] else 4, 10)
+        item("contract", "Dangerous functions", "none (mint / blacklist / pause / hidden owner)", 10, 10)
+        lp = f["lp_locked"]
+        item("contract", "Liquidity locked", f"{lp:.0f}%", 5 if lp >= 70 else 3 if lp >= 30 else 0, 5)
+        h = f["holders"]
+        item("holders", "Holders", str(h), 10 if h >= 500 else 7 if h >= 250 else 4 if h >= 100 else 0, 10)
+        t10 = f["top10"]
+        item("holders", "Top wallets (excl. contracts)", f"{t10:.0f}%", 10 if t10 <= 25 else 7 if t10 <= 35 else 3 if t10 <= 50 else 0, 10)
+        cp = f["creator_pct"]
+        item("holders", "Creator holding", f"{cp:.1f}%", 5 if cp <= 2 else 3 if cp <= 5 else 1 if cp <= 10 else 0, 5)
+
+    item("project", "Website", "live" if extra["site_ok"] else "none", 3 if extra["site_ok"] else 0, 3)
+    item("project", "Social accounts", str(extra["socials"]), 2 if extra["socials"] >= 1 else 0, 2)
+    item("project", "Description", "clear, readable" if extra["desc_ok"] else "thin", 5 if extra["desc_ok"] else 0, 5)
+    item("project", "Copycat check", "original, no older/bigger copy found", 5, 5)
+    return s, lines
+
+
 def deep_check(pair, d):
+    """Full health check. Returns (ok, reason, deep). Only coins that pass everything get through."""
     chain = pair["chainId"]
     base = pair.get("baseToken") or {}
     addr = base.get("address")
     key = f"{chain}:{addr}"
 
     safety = rugcheck_solana(addr) if chain == "solana" else goplus_check(chain, addr)
-    if not safety["ok"]:
-        return False, safety["note"], None
+    if not safety["ok"] or not safety["facts"]:
+        return False, "; ".join(safety["reasons"]) or "no safety data", None
 
     fake = copycat_check(pair)
     if fake:
@@ -457,42 +581,44 @@ def deep_check(pair, d):
         return False, "no website/socials (can't verify it's real)", None
     if REQUIRE_WEBSITE_AND_SOCIAL and (not sites or not socials):
         return False, "needs both a website and a social account to count as legit", None
-    if REQUIRE_LIVE_SITE and sites and not site_alive(sites[0]):
+    site_ok = bool(sites) and site_alive(sites[0])
+    if REQUIRE_LIVE_SITE and sites and not site_ok:
         return False, "website doesn't load (dead/fake)", None
 
     desc = (profile_desc.get(key) or safety.get("desc") or "").strip()
-    site_blurb = fetch_site_blurb(sites[0]) if sites and len(desc) < 40 else ""
-
+    site_blurb = fetch_site_blurb(sites[0]) if sites and len(desc) < MIN_DESC_LEN + 10 else ""
     context = " ".join([base.get("name", ""), base.get("symbol", ""), desc, site_blurb])
     hit = RED_RE.findall(context)
     if hit:
         return False, "scammy wording: " + ", ".join(sorted(set(h.lower() for h in hit))[:3]), None
-    if REQUIRE_NARRATIVE and len(desc) < 15 and not sites and not site_blurb:
-        return False, "no description or website (anonymous/low effort)", None
+    about_len = max(len(desc), len(site_blurb))
+    if REQUIRE_NARRATIVE and about_len < MIN_DESC_LEN:
+        return False, "can't tell what the coin is about (no real description)", None
 
     narr, bonus = read_coin(base.get("name"), base.get("symbol"), desc, site_blurb)
+    legit, lines = build_legit(chain, safety["facts"], {"site_ok": site_ok, "socials": len(socials),
+                                                        "desc_ok": about_len >= MIN_DESC_LEN})
+    if legit < MIN_LEGIT_SCORE:
+        return False, f"legit score {legit} below {MIN_LEGIT_SCORE}", None
+
     image = info.get("imageUrl") or safety.get("image") or ""
-    return True, "ok", {"safety": safety["note"] + " • Authentic ✅ no older/bigger copycat found",
-                        "desc": desc, "site_blurb": site_blurb, "narr": narr, "bonus": bonus,
-                        "image": image, "sites": sites, "socials": socials}
+    return True, "ok", {"legit": legit, "lines": lines, "desc": desc, "site_blurb": site_blurb, "narr": narr,
+                        "bonus": bonus, "image": image, "sites": sites, "socials": socials}
 
 
 # ======================================================
-# 4) DISCORD (look & feel)
+# 4) DISCORD (look & feel + routing to the 5 channels)
 # ======================================================
-BOT_NAME = "Valk's Insider Bot"
-CHAIN_ICON = {"solana": "◎", "base": "🔵", "ethereum": "⟠", "bsc": "🟡"}
-
-
-def score_bar(score, n=10):
-    filled = max(0, min(n, round(score / 100 * n)))
-    return "█" * filled + "░" * (n - filled)
-
-
 def tier(score):
     if score >= 85: return "🔱 S-TIER"
     if score >= 78: return "🥇 A-TIER"
     return "🥈 B-TIER"
+
+
+def risk_label(legit):
+    if legit >= 90: return "VERY LOW RISK"
+    if legit >= 80: return "LOW RISK"
+    return "MODERATE RISK"
 
 
 def trade_links(pair):
@@ -513,12 +639,20 @@ def trade_links(pair):
     return " • ".join(links)
 
 
+def official_links(pair, deep):
+    links = [f"[Website]({u})" for u in deep["sites"][:1]]
+    for s in (pair.get("info") or {}).get("socials") or []:
+        if s.get("url"):
+            links.append(f"[{str(s.get('type', 'link')).title()}]({s['url']})")
+    return " • ".join(links[:5])
+
+
 def build_embed(pair, score, d, deep):
+    """The main callout."""
     base = pair.get("baseToken") or {}
     chain = pair.get("chainId", "?")
     addr = base.get("address", "?")
     price = num(pair.get("priceUsd"))
-    early = d["age_min"] < 40
     about = deep["desc"] or deep["site_blurb"] or "No description provided"
 
     stats = (
@@ -534,41 +668,33 @@ def build_embed(pair, score, d, deep):
             f"```{addr}```"
             "*Hold to copy • paste into Fomo, Axiom or Photon search*\n\n")
     desc = (head + f"{tier(score)}  •  {CHAIN_ICON.get(chain, '•')} **{chain.upper()}**  •  `{pair.get('dexId', '?')}`\n"
-            f"`{score_bar(score)}`  **{score}/100**\n{stats}")
-    if early:
-        desc += "\n⚡ **EARLY ENTRY**: very young coin, higher risk. Keep size small."
+            f"`{score_bar(score)}`  📈 **BULLISH {score}/100**\n"
+            f"`{score_bar(deep['legit'])}`  🛡️ **LEGIT {deep['legit']}/100** • {risk_label(deep['legit'])}\n{stats}")
 
-    parts = [re.sub(r"\s*✅", "", p).strip() for p in deep["safety"].split(" • ") if p.strip()]
-    safety_txt = "\n".join(f"{'⚠️' if p.lower().startswith('warn') else '✅'} {p}" for p in parts[:8])
-
+    short = "\n".join(f"{i} {label}: {val}" for i, label, val, _ in deep["lines"][:7])
     fields = [
         {"name": "📝 What it's about", "value": trunc(about, 600), "inline": False},
         {"name": "🧭 Narrative", "value": trunc(deep["narr"], 250), "inline": False},
-        {"name": "🛡️ Safety & authenticity", "value": trunc(safety_txt, 600), "inline": False},
+        {"name": "🛡️ Legit check (full report in the Legit Checker channel)", "value": trunc(short, 900), "inline": False},
         {"name": "⚡ Quick trade", "value": trunc(trade_links(pair), 1000), "inline": False},
     ]
-    links = [f"[Website]({u})" for u in deep["sites"][:1]]
-    for s in (pair.get("info") or {}).get("socials") or []:
-        if s.get("url"):
-            links.append(f"[{str(s.get('type', 'link')).title()}]({s['url']})")
+    links = official_links(pair, deep)
     if links:
-        fields.append({"name": "🌐 Official", "value": " • ".join(links[:5]), "inline": False})
+        fields.append({"name": "🌐 Official", "value": links, "inline": False})
     fields.append({"name": "🎯 Plan (not advice)",
                    "value": f"Entry ref `${price:.8g}` • Invalidation −30% `${price*0.7:.8g}`\n"
                             f"Seen on {d['nsrc']} source(s). Size small, take profit in stages.\n"
                             f"📊 Bot track record: {stats_line()}\n"
                             f"👁️ Watched every {WATCH_EVERY}s: EXIT and take-profit alerts follow.",
                    "inline": False})
-
-    color = 0xF1C40F if early else (0x00FF99 if score >= 85 else (0x2ECC71 if score >= 78 else 0x3498DB))
     embed = {
-        "author": {"name": f"{BOT_NAME}  •  {'⚡ EARLY CALL' if early else '🔥 LIVE CALL'}"},
+        "author": {"name": f"{BOT_NAME}  •  🔥 LIVE CALL"},
         "title": f"{base.get('name', '?')}  (${base.get('symbol', '?')})",
         "url": pair.get("url"),
         "description": desc,
-        "color": color,
+        "color": 0x00FF99 if score >= 85 else (0x2ECC71 if score >= 78 else 0x3498DB),
         "fields": fields,
-        "footer": {"text": f"{BOT_NAME} • Nothing is guaranteed • DYOR"},
+        "footer": {"text": FOOTER + " • Nothing is guaranteed • DYOR"},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     if deep["image"]:
@@ -579,7 +705,47 @@ def build_embed(pair, score, d, deep):
     return embed
 
 
-def send_embeds(embeds, content=None):
+def build_legit_embed(pair, score, d, deep):
+    """The full health report that goes to the Legit Checker channel."""
+    base = pair.get("baseToken") or {}
+    chain = pair.get("chainId", "?")
+    addr = base.get("address", "?")
+    groups = {"contract": [], "holders": [], "project": []}
+    for icon, label, val, grp in deep["lines"]:
+        groups[grp].append(f"{icon} **{label}:** {val}")
+    market = [f"✅ **Bullish score:** {score}/100 ({tier(score)})",
+              f"✅ **Buy/sell pressure:** {d['ratio1']:.2f}x (1h) • {d['ratio5']:.2f}x (5m)",
+              f"✅ **Liquidity:** {fmt_usd(d['liq'])} ({d['liq'] / max(d['mcap'], 1) * 100:.0f}% of mcap)",
+              f"✅ **Volume:** {fmt_usd(d['vol24'])} • {d['txns']:.0f} txns • no wash-trading pattern",
+              f"✅ **Age:** {fmt_age(d['age_min'])} (past the first-45-minute danger zone)",
+              f"✅ **Live watch:** stayed healthy for {CONFIRM_SECONDS}s at 2s checks"]
+    fields = [
+        {"name": "🔐 Contract & liquidity", "value": trunc("\n".join(groups["contract"]), 1000), "inline": False},
+        {"name": "👥 Holders & bundles", "value": trunc("\n".join(groups["holders"]), 1000), "inline": False},
+        {"name": "🧾 Project", "value": trunc("\n".join(groups["project"]) + f"\n🧭 {deep['narr']}", 1000), "inline": False},
+        {"name": "📈 Market health", "value": trunc("\n".join(market), 1000), "inline": False},
+        {"name": "⚡ Quick trade", "value": trunc(trade_links(pair), 1000), "inline": False},
+    ]
+    embed = {
+        "author": {"name": f"{BOT_NAME}  •  🛡️ LEGIT CHECKER"},
+        "title": f"PASSED: {base.get('name', '?')}  (${base.get('symbol', '?')})",
+        "url": pair.get("url"),
+        "description": (f"```{addr}```"
+                        f"`{score_bar(deep['legit'])}`  🛡️ **LEGIT SCORE {deep['legit']}/100** • {risk_label(deep['legit'])}\n"
+                        f"{CHAIN_ICON.get(chain, '•')} **{chain.upper()}** • `{pair.get('dexId', '?')}`\n"
+                        "*No coin is risk-free. This is a health check, not a guarantee.*"),
+        "color": 0x3498DB,
+        "fields": fields,
+        "footer": {"text": FOOTER},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if deep["image"]:
+        embed["thumbnail"] = {"url": deep["image"]}
+    return embed
+
+
+def send_embeds(embeds, content=None, channel="callouts"):
+    url = WEBHOOKS.get(channel) or WEBHOOK_URL
     ok = True
     for e in embeds:  # one embed per message so images/fields never get squashed
         payload = {"username": BOT_NAME, "embeds": [e]}
@@ -587,18 +753,18 @@ def send_embeds(embeds, content=None):
             payload["content"] = content
             content = None
         try:
-            r = requests.post(WEBHOOK_URL, json=payload, timeout=15)
+            r = requests.post(url, json=payload, timeout=15)
             if r.status_code == 429:
                 time.sleep(float(r.json().get("retry_after", 2)) + 0.5)
-                r = requests.post(WEBHOOK_URL, json=payload, timeout=15)
+                r = requests.post(url, json=payload, timeout=15)
             if r.status_code in (200, 204):
-                print("Message sent")
+                print(f"Message sent ({channel})")
             else:
                 ok = False
-                print(f"Discord error {r.status_code}: {r.text[:200]}")
+                print(f"Discord error {r.status_code} ({channel}): {r.text[:200]}")
         except Exception as ex:
             ok = False
-            print(f"Discord send error: {ex}")
+            print(f"Discord send error ({channel}): {ex}")
         time.sleep(0.5)
     return ok
 
@@ -609,7 +775,7 @@ def send_discord_message(content: str, title: str = "Memecoin Alert"):
         "title": title,
         "description": content,
         "color": 0x00FF99,
-        "footer": {"text": BOT_NAME},
+        "footer": {"text": FOOTER},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }])
 
@@ -630,14 +796,62 @@ def send_startup():
         "fields": [
             {"name": "🔍 Detection", "value": "pump.fun • PumpSwap • Raydium • Meteora • Uniswap • PancakeSwap, "
                                               "everything Axiom, Fomo, Photon & BullX trade", "inline": False},
-            {"name": "🛡️ Protection", "value": "Rug & honeypot checks • holder/insider analysis • copycat detection "
-                                               "• scam-wording filter", "inline": False},
+            {"name": "🛡️ Legit Checker", "value": "Rug & honeypot checks • holders • bundles/insiders • creator holding • "
+                                                  "liquidity lock • copycats • website & socials", "inline": False},
             {"name": "📊 Accountability", "value": "Every call is tracked. Real results are posted 15m, 1h, 6h and 24h "
-                                                   "after the alert, with a running win rate.", "inline": False},
+                                                   "after the alert, with a running record.", "inline": False},
         ],
-        "footer": {"text": f"{BOT_NAME} • only passed coins are posted"},
+        "footer": {"text": FOOTER + " • only passed coins are posted"},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }])
+
+
+CHANGELOG = [
+    ("🔎 Wider detection", "Scans pump.fun, PumpSwap, Raydium, Meteora, Uniswap and PancakeSwap on Solana, Base, "
+                          "Ethereum and BSC, which covers every coin Fomo, Axiom, Photon and BullX trade. More pools "
+                          "and search terms are checked each scan."),
+    ("🛡️ Legit Checker channel", "Every call gets a full health report with a Legit Score out of 100: mint & freeze "
+                                "authority, liquidity lock, holders, top-10 concentration, creator holding, "
+                                "insiders/bundles, RugCheck risk, honeypot and tax tests on EVM chains, copycat check, "
+                                "live website, socials and a plain-English read of what the coin is about."),
+    ("📈 Bullish filter", "Only coins with real momentum are considered: buy pressure over 5m / 1h / 24h, accelerating "
+                         "volume, healthy liquidity, no wash-trading pattern, not already pumped."),
+    ("👁️ Live watch", "Every coin must stay healthy for 90 seconds under a 2-second live watch before it is called. "
+                     "Called coins are watched every 2 seconds for 6 hours."),
+    ("🚨 Exit alerts", "Dedicated Exit channel: liquidity pull, 25%+ liquidity drop, or a 30% drop from entry."),
+    ("💰 Take-profit alerts", "Dedicated Take Profit channel: alerts at 2x, 3x, 5x and 10x, plus a pullback warning "
+                             "when a winner drops 20% from its peak."),
+    ("📊 Track record", "Every call is followed up at 15m, 1h, 6h and 24h, and the running win record is shown on "
+                       "each new call."),
+    ("🎨 Redesign", "New call layout with the token address right next to the name, quick links to Axiom, Photon, "
+                   "BullX, Pump.fun, Birdeye, GMGN and DexScreener."),
+]
+
+
+def post_updates_if_new():
+    """Posts the changelog to the Updates channel once per VERSION."""
+    try:
+        with open(VERSION_FILE) as f:
+            if f.read().strip() == VERSION:
+                return
+    except Exception:
+        pass
+    fields = [{"name": n, "value": trunc(v, 1000), "inline": False} for n, v in CHANGELOG]
+    ok = send_embeds([{
+        "author": {"name": BOT_NAME},
+        "title": f"🆕  UPDATE v{VERSION}",
+        "description": "Everything that's been added to the bot in this release:",
+        "color": 0x9B59B6,
+        "fields": fields,
+        "footer": {"text": FOOTER},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }], channel="updates")
+    if ok:
+        try:
+            with open(VERSION_FILE, "w") as f:
+                f.write(VERSION)
+        except Exception:
+            pass
 
 
 # ======================================================
@@ -667,34 +881,13 @@ def finalize(key, change):
     s["x2"] += 1 if change >= 100 else 0
 
 
-def fetch_pairs_fast(items):
-    """One lightweight request per chain, no sleeps (used by the 2-second monitor)."""
-    by_chain = {}
-    for chain, addr in items:
-        by_chain.setdefault(chain, []).append(addr)
-    best = {}
-    for chain, addrs in by_chain.items():
-        for i in range(0, len(addrs), 30):
-            data = get_json(f"{DEX}/tokens/v1/{chain}/{','.join(addrs[i:i + 30])}", retries=0, timeout=6)
-            if isinstance(data, list):
-                for p in data:
-                    addr = (p.get("baseToken") or {}).get("address")
-                    if not addr:
-                        continue
-                    key = f"{chain}:{addr}"
-                    liq = (p.get("liquidity") or {}).get("usd") or 0
-                    if key not in best or liq > ((best[key].get("liquidity") or {}).get("usd") or 0):
-                        best[key] = p
-    return best
-
-
 def live_embed(t, title, body, color, tag):
     return {
         "author": {"name": f"{BOT_NAME}  •  {tag}"},
         "title": title,
         "description": f"**{t['name']}** (${t['symbol']})\n```{t['addr']}```{body}",
         "color": color,
-        "footer": {"text": BOT_NAME},
+        "footer": {"text": FOOTER},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -703,7 +896,7 @@ def fire_call(key, pair, final, d, deep):
     now = time.time()
     base = pair.get("baseToken") or {}
     sym = base.get("symbol")
-    print(f"  ✓ {sym}: confirmed live, sending call ({final})")
+    print(f"  ✓ {sym}: confirmed live, sending call (bullish {final}, legit {deep['legit']})")
     state["alerted"][key] = now
     state["alerts"] += 1
     price = num(pair.get("priceUsd"))
@@ -711,7 +904,8 @@ def fire_call(key, pair, final, d, deep):
                              "addr": base.get("address"), "price": price, "liq0": d["liq"],
                              "peak": price, "tp": [], "ts": now, "reported": []}
     send_embeds([build_embed(pair, final, d, deep)],
-                content=f"🚨 **{base.get('name')}** (${sym})  `{base.get('address')}`")
+                content=f"🚨 **{base.get('name')}** (${sym})  `{base.get('address')}`", channel="callouts")
+    send_embeds([build_legit_embed(pair, final, d, deep)], channel="legit")
 
 
 def check_pending(key, live, now):
@@ -757,11 +951,13 @@ def check_called(key, t, live):
     price = num(live.get("priceUsd"))
     liq = num((live.get("liquidity") or {}).get("usd"))
     t["peak"] = max(t.get("peak", entry), price)
+    if t.get("exit_sent"):
+        return
     change = (price / entry - 1) * 100
     liq_drop = (1 - liq / t["liq0"]) if t.get("liq0") else 0
     rugged = liq < 2000 or liq_drop >= 0.6
 
-    if not t.get("exit_sent") and (rugged or liq_drop >= EXIT_LIQ_DROP or price <= entry * (1 - EXIT_PRICE_DROP)):
+    if rugged or liq_drop >= EXIT_LIQ_DROP or price <= entry * (1 - EXIT_PRICE_DROP):
         t["exit_sent"] = True
         why = "LIQUIDITY BEING PULLED" if (rugged or liq_drop >= EXIT_LIQ_DROP) else f"PRICE DOWN {abs(change):.0f}% FROM ENTRY"
         send_embeds([live_embed(
@@ -769,7 +965,7 @@ def check_called(key, t, live):
             f"**{why}**\n```\nENTRY  ${entry:.8g}\nNOW    ${price:.8g}  ({change:+.0f}%)\n"
             f"LIQ    {fmt_usd(liq)}  ({-liq_drop * 100:+.0f}% vs call)\n```",
             0xE74C3C, "🚨 EXIT ALERT")],
-            content=f"🚨 **EXIT: {t['name']}** (${t['symbol']})  `{t['addr']}`")
+            content=f"🚨 **EXIT: {t['name']}** (${t['symbol']})  `{t['addr']}`", channel="exit")
         if rugged:
             finalize(key, -100.0)
         return
@@ -782,7 +978,7 @@ def check_called(key, t, live):
                 f"```\nENTRY  ${entry:.8g}\nNOW    ${price:.8g}  ({change:+.0f}%)\n```"
                 "Consider selling part (e.g. your initial amount) and letting the rest ride.",
                 0xF1C40F, "💰 TAKE PROFIT")],
-                content=f"💰 **{x}x: {t['name']}** (${t['symbol']})  `{t['addr']}`")
+                content=f"💰 **{x}x: {t['name']}** (${t['symbol']})  `{t['addr']}`", channel="profit")
 
     peak_gain = (t["peak"] / entry - 1) * 100
     if peak_gain >= 20 and not t.get("pullback_sent") and price <= t["peak"] * (1 - PEAK_PULLBACK):
@@ -791,7 +987,7 @@ def check_called(key, t, live):
             t, f"⚠️ PULLBACK: {t['name']} is down {PEAK_PULLBACK * 100:.0f}% from its peak",
             f"```\nPEAK   ${t['peak']:.8g}  ({peak_gain:+.0f}% vs entry)\nNOW    ${price:.8g}  ({change:+.0f}%)\n```"
             "Momentum is fading. Consider securing profit.",
-            0xE67E22, "⚠️ PULLBACK")])
+            0xE67E22, "⚠️ PULLBACK")], channel="profit")
 
 
 def monitor_once():
@@ -804,7 +1000,7 @@ def monitor_once():
             watch[key] = (t["chain"], t["addr"])
     if not watch:
         return
-    live = fetch_pairs_fast(watch.values())
+    live = fetch_pairs(watch.values(), pause=0)    # one light request per chain, no sleeps
     for key in list(state["pending"].keys()):
         check_pending(key, live.get(key), now)
     for key, t in list(state["tracked"].items()):
@@ -859,7 +1055,7 @@ def track_results():
                             "```"
                             f"`{t['addr']}`\n\n{stats_line()}"),
             "color": 0x2ECC71 if change > 0 else 0xE74C3C,
-            "footer": {"text": BOT_NAME},
+            "footer": {"text": FOOTER},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }])
 
@@ -893,8 +1089,7 @@ def check_for_tokens():
     results.sort(key=lambda x: x[0], reverse=True)
     print(f"  {len(results)} passed market filters")
 
-    summary = {"candidates": len(candidates), "pairs": len(pairs), "passed_market": len(results), "queued": 0}
-    checked = 0
+    queued, checked = 0, 0
     for score, key, pair, d in results:
         if checked >= MAX_DEEP_CHECKS_PER_SCAN:
             break
@@ -912,14 +1107,13 @@ def check_for_tokens():
             print(f"  ✗ {sym}: {reason}")
             continue
         # passed every static check: now it must stay healthy under the 2-second live watch before it is called
-        print(f"  … {sym}: passed all checks, confirming live for {CONFIRM_SECONDS}s")
+        print(f"  … {sym}: passed all checks (legit {deep['legit']}), confirming live for {CONFIRM_SECONDS}s")
         state["pending"][key] = {"chain": pair["chainId"], "addr": base.get("address"), "pair": pair,
                                  "deep": deep, "nsrc": d["nsrc"], "t0": now, "liq0": d["liq"],
                                  "price0": num(pair.get("priceUsd"))}
-        summary["queued"] += 1
-    if not summary["queued"]:
+        queued += 1
+    if not queued:
         print("  nothing passed all checks this round")
-    return summary
 
 
 def status_if_due():
@@ -937,7 +1131,7 @@ def status_if_due():
                             f"TRACKING  {len(state['tracked'])}\n"
                             "```" + stats_line()),
             "color": 0x95A5A6,
-            "footer": {"text": BOT_NAME},
+            "footer": {"text": FOOTER},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }])
 
@@ -945,6 +1139,7 @@ def status_if_due():
 if __name__ == "__main__":
     print("Memecoin webhook bot started...")
     send_startup()
+    post_updates_if_new()
     state["last_status"] = time.time()
     threading.Thread(target=monitor_loop, daemon=True).start()   # live watch every 2 seconds
     while True:
