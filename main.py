@@ -21,21 +21,22 @@ from collections import Counter
 # ======================================================
 BOT_NAME = "Valk's Insider Bot"
 CREDIT = "Created by @valk_ on Fomo"
-VERSION = "3.1.0"                # bump this when you add something new, it posts to the Updates channel
+VERSION = "3.2.0"                # bump this when you add something new, it posts to the Updates channel
 
 # ---- Discord webhooks (keep this file PRIVATE) ----
 WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
 WEBHOOKS = {
-    "callouts": WEBHOOK_URL,   # original callouts, results, startup
+    "callouts": WEBHOOK_URL,   # ONLY live coin calls go here
     "legit":    "https://discord.com/api/webhooks/1572179140071788584/VkNt0IGCHgf4n5VQIcZpVdkV2SVbSyL-kQiqhW-9LUP0_EZoyOIJPLEbb7zGdGv4ByQn",
     "exit":     "https://discord.com/api/webhooks/1572181849743163534/EOfiZofRjTm7tMfB_c6dSqAZX33Q25aCNVuFwzzyoi-mOXsrDalgM3G0g7SgvoaOjyYC",
     "profit":   "https://discord.com/api/webhooks/1572181743602241628/hyY_K931H6dEC8NTd5N5yIuy8ulXok3P9WDXzSVAhsPvozGCILgVSl8_8CoUoCTOWVaq",
     "updates":  "https://discord.com/api/webhooks/1572187465547255898/zl1XiPtRaCXFylwk84rqllawjUsRTngaY4wFh6Y2uRYsBh1y6cbmwdOIILvTOwnLfCYO",
-    # NEW: every failed / near-miss coin + scan stats go here so you know the bot is working
     "rejected": "https://discord.com/api/webhooks/1572214932437467290/YDHnjzY-Qye0WLTyZGX7otrFTVDRwXypvbNyTt-6nuRbQelBeullgrfvjWyxXCvwvCVQ",
+    # Results / performance tracking (15m, 1h, 6h, 24h) - NEVER goes to callouts
+    "results":  "https://discord.com/api/webhooks/1572558043541938297/97Rv4OO0feG5RGzv4lYBiVOrGr8NaQQZDb7FZ59L9H6rDp3-sfPPF4M_tQocYeT2YmUZ",
 }
 
-CHECK_INTERVAL = 45              # was 60 → slightly faster scans
+CHECK_INTERVAL = 35              # v3.2: faster full scan cycle
 REALERT_AFTER = 8 * 3600         # was 12h → allow re-alert sooner if a coin re-ignites
 RECHECK_REJECTED_AFTER = 900     # was 1800 → re-check rejects after 15 min
 MAX_DEEP_CHECKS_PER_SCAN = 28    # was 20 → more candidates get full health check
@@ -77,7 +78,7 @@ REQUIRE_SAFETY_DATA = True
 
 # ---- Live monitor ----
 WATCH_EVERY = 2
-CONFIRM_SECONDS = 50             # was 90 → faster confirmation so good coins don't get missed
+CONFIRM_SECONDS = 28             # v3.2: much faster live confirm so numbers stay fresh
 CONFIRM_MAX_LIQ_DROP = 0.12
 CONFIRM_MAX_PRICE_DROP = 0.12
 MONITOR_HOURS = 6
@@ -827,12 +828,11 @@ def send_startup():
 
 
 CHANGELOG = [
-    ("⚡ More early low-MC calls", "Relaxed age window (20–360 min), lower liquidity / volume / mcap floors, and lower score thresholds so the bot actually finds early winners every 10–20 minutes instead of staying silent for hours."),
-    ("🧪 Rejected / Debug channel", "Every scan posts a short activity report + the best near-misses (high bullish score that failed legit) so you always know the bot is alive and what it is filtering out."),
-    ("⏱️ Faster confirmation", "Live watch confirmation reduced from 90s → 50s so good coins are not lost while waiting."),
-    ("🛡️ Still strict on safety", "Mint/freeze, honeypot, insider/bundle, creator %, LP lock and copycat checks remain. We only loosened the pure market gates."),
-    ("📈 Better ranking", "Extra weight on the 30–150 min sweet-spot age and improved buy-pressure scoring."),
-    ("🔄 More sources & deep checks", "Extra GeckoTerminal pages on Solana + more deep checks per scan (28)."),
+    ("🔥 Fresh data on every call", "Right before posting a call the bot re-fetches the pair from DexScreener so the MC / price / liquidity you see is the live number at the exact moment of the alert (fixes the 200k → 80k lag)."),
+    ("⏱️ Much faster confirmation", "Live confirmation window cut from 50s → 28s. Combined with the fresh fetch this makes calls significantly earlier and more accurate."),
+    ("📊 Results channel only", "15m / 1h / 6h / 24h performance updates now go exclusively to the #results webhook. Callouts stays clean — only real coin calls."),
+    ("⚡ Faster full scan cycle", "CHECK_INTERVAL reduced to 35s so the bot scans the market more often."),
+    ("🛡️ Safety still strict", "All rug / honeypot / insider / LP / creator checks remain. We only fixed latency and routing."),
 ]
 
 
@@ -899,10 +899,26 @@ def live_embed(t, title, body, color, tag):
 
 
 def fire_call(key, pair, final, d, deep):
+    """Final call. Always re-fetch the absolute latest pair data right before posting
+    so the MC / price / liq shown in the embed match what the user sees when they click."""
     now = time.time()
     base = pair.get("baseToken") or {}
     sym = base.get("symbol")
-    print(f"  ✓ {sym}: confirmed live, sending call (bullish {final}, legit {deep['legit']})")
+    chain = pair.get("chainId")
+    addr = base.get("address")
+
+    # --- CRITICAL: fresh snapshot so numbers are not stale ---
+    fresh_pairs = fetch_pairs([(chain, addr)], pause=0)
+    fresh = fresh_pairs.get(key) or pair
+    ev = evaluate(fresh, d.get("nsrc", 1))
+    if ev:
+        final = min(100, ev[0] + deep.get("bonus", 0))
+        d = ev[1]
+        pair = fresh
+        base = pair.get("baseToken") or {}
+        sym = base.get("symbol") or sym
+
+    print(f"  ✓ {sym}: confirmed live + FRESH data, sending call (bullish {final}, legit {deep['legit']}, mcap {fmt_usd(d['mcap'])})")
     state["alerted"][key] = now
     state["alerts"] += 1
     price = num(pair.get("priceUsd"))
@@ -1063,7 +1079,7 @@ def track_results():
             "color": 0x2ECC71 if change > 0 else 0xE74C3C,
             "footer": {"text": FOOTER},
             "timestamp": datetime.now(timezone.utc).isoformat(),
-        }])
+        }], channel="results")
 
 
 # ======================================================
@@ -1208,7 +1224,7 @@ def status_if_due():
             "color": 0x95A5A6,
             "footer": {"text": FOOTER},
             "timestamp": datetime.now(timezone.utc).isoformat(),
-        }])
+        }], channel="rejected")
 
 
 if __name__ == "__main__":
