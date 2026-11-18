@@ -21,7 +21,7 @@ from collections import Counter
 # ======================================================
 BOT_NAME = "Valk's Insider Bot"
 CREDIT = "Created by @valk_ on Fomo"
-VERSION = "3.5.0"                # bump this when you add something new, it posts to the Updates channel
+VERSION = "3.6.0"                # bump this when you add something new, it posts to the Updates channel
 
 # ---- Discord webhooks (keep this file PRIVATE) ----
 WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
@@ -60,16 +60,16 @@ MAX_VOL_TO_LIQ = 50              # was 40
 MIN_SCORE = 72                   # v3.5: only clearly bullish coins
 
 # ---- Legit filters (health check) — still strict to protect reputation ----
-MIN_LEGIT_SCORE = 70             # v3.5: higher legit bar for reputation + run potential
-MAX_RUGCHECK_SCORE = 45          # was 40 (slightly more tolerant)
-MAX_TOP10_HOLDER_PCT = 48        # v3.5: cleaner distribution preferred
-MIN_HOLDERS = 55                 # v3.5: a bit more organic distribution
-MAX_INSIDERS_TOP10 = 2           # was 1
-MAX_CREATOR_PCT = 8              # v3.5: creator must be light
-MAX_TRANSFER_FEE_PCT = 5
-MIN_LP_LOCKED_PCT = 35           # v3.3: many early good coins lock gradually
-MAX_TAX_PCT = 10
-MIN_SOCIAL_LINKS = 1             # was 2
+MIN_LEGIT_SCORE = 74             # v3.6: higher safety bar
+MAX_RUGCHECK_SCORE = 35          # v3.6: stricter risk score
+MAX_TOP10_HOLDER_PCT = 42        # v3.6: tighter distribution
+MIN_HOLDERS = 70                 # v3.6: more organic holder base
+MAX_INSIDERS_TOP10 = 1           # v3.6: max 1 insider-linked in top 10
+MAX_CREATOR_PCT = 6              # v3.6: creator must be very light
+MAX_TRANSFER_FEE_PCT = 3         # v3.6: lower tax tolerance
+MIN_LP_LOCKED_PCT = 50           # v3.6: prefer clearer LP lock when data exists
+MAX_TAX_PCT = 6                  # v3.6: stricter tax/honeypot tolerance
+MIN_SOCIAL_LINKS = 1             # keep 1 but we will enforce more carefully at low MC
 REQUIRE_WEBSITE_AND_SOCIAL = False  # was True → many pure memes only have Twitter
 REQUIRE_LIVE_SITE = False        # was True → don't kill a coin just because site is slow
 REQUIRE_NARRATIVE = False        # was True → pure memes often have short descriptions
@@ -359,6 +359,9 @@ def rugcheck_solana(mint):
         reasons.append("already rugged")
     if danger:
         reasons.append("danger: " + ", ".join(danger[:3]))
+    # v3.6 extra: any "danger" level risk is an automatic fail for reputation safety
+    if danger:
+        reasons.append("danger-level risk present")
     raw_score = data.get("score_normalised")
     risk_score = num(raw_score) if raw_score is not None else None
     if risk_score is not None and risk_score > MAX_RUGCHECK_SCORE:
@@ -376,6 +379,8 @@ def rugcheck_solana(mint):
     top1 = num(holders[0].get("pct")) if holders else 0.0
     if top10 > MAX_TOP10_HOLDER_PCT:
         reasons.append(f"top 10 hold {top10:.0f}%")
+    if top1 >= 18:
+        reasons.append(f"top wallet holds {top1:.0f}% (too concentrated)")
     insiders = sum(1 for h in holders[:10] if h.get("insider"))
     if insiders > MAX_INSIDERS_TOP10:
         reasons.append(f"{insiders} insider/linked wallets in top 10")
@@ -607,6 +612,17 @@ def deep_check(pair, d):
     safety = rugcheck_solana(addr) if chain == "solana" else goplus_check(chain, addr)
     if not safety["ok"] or not safety["facts"]:
         return False, "; ".join(safety["reasons"]) or "no safety data", None
+
+    # v3.6 extra safety: at very low MC demand cleaner profile
+    mcap = d.get("mcap") or 0
+    facts = safety["facts"]
+    if mcap < 25_000:
+        if facts.get("creator_pct") is not None and facts["creator_pct"] > 5:
+            return False, f"low-MC creator still holds {facts['creator_pct']:.0f}%", None
+        if facts.get("top10") and facts["top10"] > 38:
+            return False, f"low-MC top10 holds {facts['top10']:.0f}%", None
+        if facts.get("insider_network"):
+            return False, "low-MC + insider network", None
 
     fake = copycat_check(pair)
     if fake:
@@ -842,10 +858,10 @@ def send_startup():
 
 
 CHANGELOG = [
-    ("🎯 High-conviction early runners (v3.5)", "Target ~10k MC entries that show real buy pressure, volume acceleration and clean distribution — the profile of coins that can realistically push toward 300k+."),
-    ("📈 Stronger momentum required", "1h buy/sell ratio must be clearly positive (1.18x+). Volume velocity and sustained buying are now heavily weighted in the score."),
-    ("🛡️ Higher quality bar", "MIN_SCORE 72 + MIN_LEGIT 70. Creator max 8%, cleaner top holders. Only the strongest early setups pass."),
-    ("⚡ Still near-instant", "5s confirmation. Fresh data fetch on every call. You get in early on the ones that actually look ready to run."),
+    ("🛡️ Extra safety layer (v3.6)", "Any RugCheck danger-level risk = automatic reject. Top wallet >18% rejected. Creator max 6%. Top10 tighter (42%). Tax/honeypot limits lowered. Low-MC coins get even stricter creator/holder checks."),
+    ("🎯 Still early high-conviction", "Still hunts ~10k MC with strong buy pressure and run potential, but only the cleanest ones pass the new safety gates."),
+    ("📈 Quality over quantity", "MIN_LEGIT raised to 74. Insider limit = 1. LP lock preference raised. Built to protect your community reputation."),
+    ("⚡ Speed kept", "Still near-instant calls + fresh MC/price on every alert."),
 ]
 
 
