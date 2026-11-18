@@ -21,7 +21,7 @@ from collections import Counter
 # ======================================================
 BOT_NAME = "Valk's Insider Bot"
 CREDIT = "Created by @valk_ on Fomo"
-VERSION = "3.2.0"                # bump this when you add something new, it posts to the Updates channel
+VERSION = "3.4.0"                # bump this when you add something new, it posts to the Updates channel
 
 # ---- Discord webhooks (keep this file PRIVATE) ----
 WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
@@ -36,38 +36,38 @@ WEBHOOKS = {
     "results":  "https://discord.com/api/webhooks/1572558043541938297/97Rv4OO0feG5RGzv4lYBiVOrGr8NaQQZDb7FZ59L9H6rDp3-sfPPF4M_tQocYeT2YmUZ",
 }
 
-CHECK_INTERVAL = 35              # v3.2: faster full scan cycle
+CHECK_INTERVAL = 18              # v3.4: rapid scans
 REALERT_AFTER = 8 * 3600         # was 12h → allow re-alert sooner if a coin re-ignites
 RECHECK_REJECTED_AFTER = 900     # was 1800 → re-check rejects after 15 min
-MAX_DEEP_CHECKS_PER_SCAN = 28    # was 20 → more candidates get full health check
+MAX_DEEP_CHECKS_PER_SCAN = 35    # v3.3: check more candidates per scan
 STATUS_EVERY = 30 * 60           # status every 30 min (was 6h)
 SEND_STATUS = True               # now ON so you always see activity
 SEND_RESULT_UPDATES = True
 VERSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".bot_version")
 
 # ---- Bullish filters (market) — RELAXED for early low-MC winners ----
-MIN_PAIR_AGE_MIN = 20            # was 45 → catch earlier (still past the absolute first minutes)
-MAX_PAIR_AGE_MIN = 360           # was 240 → allow up to 6 hours
-MIN_LIQUIDITY_USD = 8_000        # was 15k
-MIN_VOLUME_24H = 12_000          # was 25k
-MIN_MARKET_CAP = 12_000          # was 40k  ← big change for low-MC hunting
+MIN_PAIR_AGE_MIN = 8             # v3.3: very early (still avoid the absolute first 1-2 min snipers)
+MAX_PAIR_AGE_MIN = 240           # v3.3: focus on fresher coins (up to 4h)
+MIN_LIQUIDITY_USD = 5_500        # v3.3: lower for earlier entries
+MIN_VOLUME_24H = 8_000           # v3.3: earlier volume threshold
+MIN_MARKET_CAP = 8_000           # v3.3: catch lower MC while still liquid enough
 MAX_MARKET_CAP = 8_000_000       # was 5M
-MIN_TXNS_24H = 100               # was 250
-MIN_LIQ_TO_MCAP = 0.04           # was 0.06
-MIN_BUY_SELL_RATIO_H1 = 1.05     # was 1.2  (still requires net buying)
+MIN_TXNS_24H = 70                # v3.3: allow earlier activity
+MIN_LIQ_TO_MCAP = 0.035          # v3.3: slightly more flexible
+MIN_BUY_SELL_RATIO_H1 = 1.02     # v3.3: still requires net buying pressure
 MAX_24H_PUMP_PCT = 1200          # was 800
 MAX_VOL_TO_LIQ = 50              # was 40
-MIN_SCORE = 68                   # was 75  ← more coins reach the legit stage
+MIN_SCORE = 62                   # v3.3: earlier coins can pass market stage
 
 # ---- Legit filters (health check) — still strict to protect reputation ----
-MIN_LEGIT_SCORE = 68             # was 75
+MIN_LEGIT_SCORE = 64             # v3.3: still high bar, just slightly more reachable early
 MAX_RUGCHECK_SCORE = 45          # was 40 (slightly more tolerant)
-MAX_TOP10_HOLDER_PCT = 55        # was 50
-MIN_HOLDERS = 60                 # was 100
+MAX_TOP10_HOLDER_PCT = 52        # v3.3: still strict on concentration
+MIN_HOLDERS = 45                 # v3.3: early coins have fewer holders – still filter dust
 MAX_INSIDERS_TOP10 = 2           # was 1
-MAX_CREATOR_PCT = 12             # was 10
+MAX_CREATOR_PCT = 10             # v3.3: tighter on creator holding
 MAX_TRANSFER_FEE_PCT = 5
-MIN_LP_LOCKED_PCT = 40           # was 50 (many good early coins lock later)
+MIN_LP_LOCKED_PCT = 35           # v3.3: many early good coins lock gradually
 MAX_TAX_PCT = 10
 MIN_SOCIAL_LINKS = 1             # was 2
 REQUIRE_WEBSITE_AND_SOCIAL = False  # was True → many pure memes only have Twitter
@@ -78,9 +78,9 @@ REQUIRE_SAFETY_DATA = True
 
 # ---- Live monitor ----
 WATCH_EVERY = 2
-CONFIRM_SECONDS = 28             # v3.2: much faster live confirm so numbers stay fresh
-CONFIRM_MAX_LIQ_DROP = 0.12
-CONFIRM_MAX_PRICE_DROP = 0.12
+CONFIRM_SECONDS = 6              # v3.4: near-instant call (only rejects clear dumps)
+CONFIRM_MAX_LIQ_DROP = 0.18      # slightly more tolerant in the 6s window
+CONFIRM_MAX_PRICE_DROP = 0.18
 MONITOR_HOURS = 6
 EXIT_LIQ_DROP = 0.25
 EXIT_PRICE_DROP = 0.30
@@ -305,14 +305,16 @@ def evaluate(pair, nsrc=1):
     info = pair.get("info") or {}
     score += 3 if info.get("socials") else 0
     score += 3 if info.get("websites") else 0
-    # Prefer the sweet spot of 30–150 min old (early but not brand new)
+    # Prefer the sweet spot of 8–90 min old (very early but past the first sniper seconds)
     if age_min is not None:
-        if 30 <= age_min <= 150:
-            score += 12
-        elif 20 <= age_min <= 240:
-            score += 6
+        if 8 <= age_min <= 45:
+            score += 14          # highest priority – early entry zone
+        elif 45 < age_min <= 90:
+            score += 10
+        elif 90 < age_min <= 180:
+            score += 5
         else:
-            score += 2
+            score += 1
     score += min(10, (nsrc - 1) * 4)
 
     return min(100, round(score)), {
@@ -828,11 +830,10 @@ def send_startup():
 
 
 CHANGELOG = [
-    ("🔥 Fresh data on every call", "Right before posting a call the bot re-fetches the pair from DexScreener so the MC / price / liquidity you see is the live number at the exact moment of the alert (fixes the 200k → 80k lag)."),
-    ("⏱️ Much faster confirmation", "Live confirmation window cut from 50s → 28s. Combined with the fresh fetch this makes calls significantly earlier and more accurate."),
-    ("📊 Results channel only", "15m / 1h / 6h / 24h performance updates now go exclusively to the #results webhook. Callouts stays clean — only real coin calls."),
-    ("⚡ Faster full scan cycle", "CHECK_INTERVAL reduced to 35s so the bot scans the market more often."),
-    ("🛡️ Safety still strict", "All rug / honeypot / insider / LP / creator checks remain. We only fixed latency and routing."),
+    ("⚡ Near-instant calls (v3.4)", "Confirmation window cut to 6 seconds. Strong high-score coins can clear in as little as 3 seconds. Goal: you see the call as soon as the bot decides it is good."),
+    ("🎯 Still only bullish + legit", "Safety filters stay strict (mint/freeze, holders, creator %, honeypot, insiders, LP). We only removed the artificial delay, not the quality bar."),
+    ("🚀 Early MC focus kept", "Still hunts 8 min+ coins with low but healthy liquidity/volume so you can enter early."),
+    ("🔥 Fresh data on every call", "Always re-fetches MC/price/liq right before the message is sent."),
 ]
 
 
@@ -950,7 +951,9 @@ def check_pending(key, live, now):
         state["rejected"][key] = now
         print(f"  ✗ {sym}: failed live confirmation (liq/price dropping)")
         return
-    if now - pend["t0"] < CONFIRM_SECONDS:
+    # Near-instant for strong coins: only wait the full window if score is borderline
+    min_wait = 3 if pend.get("deep", {}).get("legit", 0) >= 75 and pend.get("final_est", 70) >= 78 else CONFIRM_SECONDS
+    if now - pend["t0"] < min_wait:
         return
     state["pending"].pop(key, None)
     ev = evaluate(live, pend["nsrc"])
@@ -1193,7 +1196,8 @@ def check_for_tokens():
         state["pending"][key] = {
             "chain": pair["chainId"], "addr": base.get("address"), "pair": pair,
             "deep": deep, "nsrc": d["nsrc"], "t0": now, "liq0": d["liq"],
-            "price0": num(pair.get("priceUsd"))
+            "price0": num(pair.get("priceUsd")),
+            "final_est": min(100, score + deep.get("bonus", 0))
         }
         queued += 1
 
