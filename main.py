@@ -21,7 +21,7 @@ from collections import Counter
 # ======================================================
 BOT_NAME = "Valk's Insider Bot"
 CREDIT = "Created by @valk_ on Fomo"
-VERSION = "3.6.0"                # bump this when you add something new, it posts to the Updates channel
+VERSION = "3.7.0"                # bump this when you add something new, it posts to the Updates channel
 
 # ---- Discord webhooks (keep this file PRIVATE) ----
 WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
@@ -48,19 +48,19 @@ VERSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".bot_ve
 # ---- Bullish filters (market) — RELAXED for early low-MC winners ----
 MIN_PAIR_AGE_MIN = 8             # v3.3: very early (still avoid the absolute first 1-2 min snipers)
 MAX_PAIR_AGE_MIN = 240           # v3.3: focus on fresher coins (up to 4h)
-MIN_LIQUIDITY_USD = 4_800        # v3.5: early but still tradeable
+MIN_LIQUIDITY_USD = 6_000        # v3.7: need real liquidity even early
 MIN_VOLUME_24H = 9_500           # v3.5: require real volume even at low MC
-MIN_MARKET_CAP = 7_000           # v3.5: super early zone (~10k target)
-MAX_MARKET_CAP = 2_500_000       # v3.5: focus on coins that still have room to 300k+
+MIN_MARKET_CAP = 5_000           # v3.7: true early zone (5-10k focus)
+MAX_MARKET_CAP = 1_200_000       # v3.7: still allow higher MC but primary focus is early
 MIN_TXNS_24H = 85                # v3.5: need clear activity
-MIN_LIQ_TO_MCAP = 0.045          # v3.5: healthier liq ratio at low MC
+MIN_LIQ_TO_MCAP = 0.06           # v3.7: stronger liquidity requirement
 MIN_BUY_SELL_RATIO_H1 = 1.18     # v3.5: must show clear buying pressure
-MAX_24H_PUMP_PCT = 1200          # was 800
+MAX_24H_PUMP_PCT = 450           # v3.7: reject already-parabolic pumps
 MAX_VOL_TO_LIQ = 50              # was 40
-MIN_SCORE = 72                   # v3.5: only clearly bullish coins
+MIN_SCORE = 75                   # v3.7: higher bar after LuciASS lesson
 
 # ---- Legit filters (health check) — still strict to protect reputation ----
-MIN_LEGIT_SCORE = 74             # v3.6: higher safety bar
+MIN_LEGIT_SCORE = 78             # v3.7: stricter after the rug
 MAX_RUGCHECK_SCORE = 35          # v3.6: stricter risk score
 MAX_TOP10_HOLDER_PCT = 42        # v3.6: tighter distribution
 MIN_HOLDERS = 70                 # v3.6: more organic holder base
@@ -283,6 +283,14 @@ def evaluate(pair, nsrc=1):
         return None
     if ch24 > MAX_24H_PUMP_PCT or ch1 < -8 or ch24 < -40:
         return None
+    # v3.7 LuciASS fix: reject already-parabolic short-term pumps
+    if ch1 >= 120 and mcap > 40_000:
+        return None
+    if ch5 >= 40 and mcap > 25_000:
+        return None
+    # reject thin liquidity relative to recent volume (common pre-rug pattern)
+    if liq > 0 and vol1 > 0 and vol1 / liq > 8:
+        return None
     ratio1, ratio24, ratio5 = b1 / max(s1, 1), b24 / max(s24, 1), b5 / max(s5, 1)
     if ratio1 < MIN_BUY_SELL_RATIO_H1 or ratio24 < 0.85:
         return None
@@ -329,7 +337,13 @@ def evaluate(pair, nsrc=1):
     # Appearing on multiple sources early is a strong signal
     score += min(12, (nsrc - 1) * 5)
 
-    return min(100, round(score)), {
+    # v3.7: never give perfect / S-tier scores on elevated risk profiles
+    if ch1 > 80 or ch5 > 25:
+        score = min(score, 82)
+    if mcap > 80_000:
+        score = min(score, 85)
+
+    return min(96, round(score)), {
         "liq": liq, "mcap": mcap, "vol24": vol24, "ch1": ch1, "ch6": ch6, "ch24": ch24,
         "ratio1": ratio1, "ratio5": ratio5, "age_min": age_min, "txns": b24 + s24, "nsrc": nsrc,
     }
@@ -858,10 +872,10 @@ def send_startup():
 
 
 CHANGELOG = [
-    ("🛡️ Extra safety layer (v3.6)", "Any RugCheck danger-level risk = automatic reject. Top wallet >18% rejected. Creator max 6%. Top10 tighter (42%). Tax/honeypot limits lowered. Low-MC coins get even stricter creator/holder checks."),
-    ("🎯 Still early high-conviction", "Still hunts ~10k MC with strong buy pressure and run potential, but only the cleanest ones pass the new safety gates."),
-    ("📈 Quality over quantity", "MIN_LEGIT raised to 74. Insider limit = 1. LP lock preference raised. Built to protect your community reputation."),
-    ("⚡ Speed kept", "Still near-instant calls + fresh MC/price on every alert."),
+    ("🛑 LuciASS post-mortem fix (v3.7)", "Rejected already-parabolic pumps (+120% 1h or +40% 5m at elevated MC). Stronger liquidity requirements. Hard cap on scores so we never show S-TIER 100 on dangerous vertical pumps."),
+    ("🎯 True early focus", "Primary target is now 5–15k MC coins with room to 300k. Higher MC still allowed but with stricter momentum filters."),
+    ("🛡️ Safety raised again", "MIN_LEGIT 78, better liq/MC ratio, reject thin-liq high-volume spikes that often precede rugs."),
+    ("⚡ Still fast + fresh data", "Near-instant calls with live MC/price fetch right before posting."),
 ]
 
 
