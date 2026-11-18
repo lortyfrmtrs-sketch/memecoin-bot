@@ -21,7 +21,7 @@ from collections import Counter
 # ======================================================
 BOT_NAME = "Valk's Insider Bot"
 CREDIT = "Created by @valk_ on Fomo"
-VERSION = "3.4.0"                # bump this when you add something new, it posts to the Updates channel
+VERSION = "3.5.0"                # bump this when you add something new, it posts to the Updates channel
 
 # ---- Discord webhooks (keep this file PRIVATE) ----
 WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
@@ -36,7 +36,7 @@ WEBHOOKS = {
     "results":  "https://discord.com/api/webhooks/1572558043541938297/97Rv4OO0feG5RGzv4lYBiVOrGr8NaQQZDb7FZ59L9H6rDp3-sfPPF4M_tQocYeT2YmUZ",
 }
 
-CHECK_INTERVAL = 18              # v3.4: rapid scans
+CHECK_INTERVAL = 15              # v3.5: very fast scans for 10k MC entries
 REALERT_AFTER = 8 * 3600         # was 12h → allow re-alert sooner if a coin re-ignites
 RECHECK_REJECTED_AFTER = 900     # was 1800 → re-check rejects after 15 min
 MAX_DEEP_CHECKS_PER_SCAN = 35    # v3.3: check more candidates per scan
@@ -48,24 +48,24 @@ VERSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".bot_ve
 # ---- Bullish filters (market) — RELAXED for early low-MC winners ----
 MIN_PAIR_AGE_MIN = 8             # v3.3: very early (still avoid the absolute first 1-2 min snipers)
 MAX_PAIR_AGE_MIN = 240           # v3.3: focus on fresher coins (up to 4h)
-MIN_LIQUIDITY_USD = 5_500        # v3.3: lower for earlier entries
-MIN_VOLUME_24H = 8_000           # v3.3: earlier volume threshold
-MIN_MARKET_CAP = 8_000           # v3.3: catch lower MC while still liquid enough
-MAX_MARKET_CAP = 8_000_000       # was 5M
-MIN_TXNS_24H = 70                # v3.3: allow earlier activity
-MIN_LIQ_TO_MCAP = 0.035          # v3.3: slightly more flexible
-MIN_BUY_SELL_RATIO_H1 = 1.02     # v3.3: still requires net buying pressure
+MIN_LIQUIDITY_USD = 4_800        # v3.5: early but still tradeable
+MIN_VOLUME_24H = 9_500           # v3.5: require real volume even at low MC
+MIN_MARKET_CAP = 7_000           # v3.5: super early zone (~10k target)
+MAX_MARKET_CAP = 2_500_000       # v3.5: focus on coins that still have room to 300k+
+MIN_TXNS_24H = 85                # v3.5: need clear activity
+MIN_LIQ_TO_MCAP = 0.045          # v3.5: healthier liq ratio at low MC
+MIN_BUY_SELL_RATIO_H1 = 1.18     # v3.5: must show clear buying pressure
 MAX_24H_PUMP_PCT = 1200          # was 800
 MAX_VOL_TO_LIQ = 50              # was 40
-MIN_SCORE = 62                   # v3.3: earlier coins can pass market stage
+MIN_SCORE = 72                   # v3.5: only clearly bullish coins
 
 # ---- Legit filters (health check) — still strict to protect reputation ----
-MIN_LEGIT_SCORE = 64             # v3.3: still high bar, just slightly more reachable early
+MIN_LEGIT_SCORE = 70             # v3.5: higher legit bar for reputation + run potential
 MAX_RUGCHECK_SCORE = 45          # was 40 (slightly more tolerant)
-MAX_TOP10_HOLDER_PCT = 52        # v3.3: still strict on concentration
-MIN_HOLDERS = 45                 # v3.3: early coins have fewer holders – still filter dust
+MAX_TOP10_HOLDER_PCT = 48        # v3.5: cleaner distribution preferred
+MIN_HOLDERS = 55                 # v3.5: a bit more organic distribution
 MAX_INSIDERS_TOP10 = 2           # was 1
-MAX_CREATOR_PCT = 10             # v3.3: tighter on creator holding
+MAX_CREATOR_PCT = 8              # v3.5: creator must be light
 MAX_TRANSFER_FEE_PCT = 5
 MIN_LP_LOCKED_PCT = 35           # v3.3: many early good coins lock gradually
 MAX_TAX_PCT = 10
@@ -78,7 +78,7 @@ REQUIRE_SAFETY_DATA = True
 
 # ---- Live monitor ----
 WATCH_EVERY = 2
-CONFIRM_SECONDS = 6              # v3.4: near-instant call (only rejects clear dumps)
+CONFIRM_SECONDS = 5              # v3.5: almost instant once it passes quality
 CONFIRM_MAX_LIQ_DROP = 0.18      # slightly more tolerant in the 6s window
 CONFIRM_MAX_PRICE_DROP = 0.18
 MONITOR_HOURS = 6
@@ -292,30 +292,42 @@ def evaluate(pair, nsrc=1):
         return None
 
     score = 0
-    score += min(22, ratio1 * 9)
-    score += min(8, ratio5 * 3.5) if (b5 + s5) >= 4 else 0
-    score += min(10, max(0, (ratio24 - 1) * 18))
-    score += 8 if ch5 >= 0 else 0
-    score += 9 if ch1 > 0 else 0
+    # --- Momentum / run potential (heavily weighted) ---
+    score += min(26, ratio1 * 11)                          # 1h buy pressure is king
+    score += min(12, ratio5 * 5) if (b5 + s5) >= 5 else 0  # strong recent buys
+    score += min(12, max(0, (ratio24 - 1) * 20))           # sustained buying
+    score += 10 if ch5 >= 3 else (6 if ch5 >= 0 else 0)
+    score += 11 if ch1 >= 8 else (7 if ch1 > 0 else 0)
     score += 6 if ch6 > 0 else 0
-    score += 7 if 8 <= ch24 <= 600 else (3 if ch24 > 0 else 0)
-    score += min(12, (vol1 * 24 / max(vol24, 1)) * 6)
-    score += min(9, (liq / max(mcap, 1)) * 90)
-    score += 5 if liq >= 25_000 else (3 if liq >= 12_000 else 0)
+    score += 8 if 15 <= ch24 <= 500 else (3 if ch24 > 0 else 0)
+
+    # Volume velocity (coins that are heating up)
+    vol_accel = (vol1 * 24 / max(vol24, 1)) if vol24 else 0
+    score += min(14, vol_accel * 7)
+
+    # Healthy liquidity at low MC (important for ability to run)
+    liq_ratio = liq / max(mcap, 1)
+    score += min(11, liq_ratio * 110)
+    score += 6 if liq >= 18_000 else (3 if liq >= 8_000 else 0)
+
+    # Social / website = higher chance of narrative continuation
     info = pair.get("info") or {}
-    score += 3 if info.get("socials") else 0
+    score += 4 if info.get("socials") else 0
     score += 3 if info.get("websites") else 0
-    # Prefer the sweet spot of 8–90 min old (very early but past the first sniper seconds)
+
+    # Age sweet spot for 10k → 300k type runs
     if age_min is not None:
-        if 8 <= age_min <= 45:
-            score += 14          # highest priority – early entry zone
-        elif 45 < age_min <= 90:
-            score += 10
-        elif 90 < age_min <= 180:
-            score += 5
+        if 8 <= age_min <= 35:
+            score += 15          # prime early entry
+        elif 35 < age_min <= 70:
+            score += 9
+        elif 70 < age_min <= 140:
+            score += 4
         else:
-            score += 1
-    score += min(10, (nsrc - 1) * 4)
+            score += 0
+
+    # Appearing on multiple sources early is a strong signal
+    score += min(12, (nsrc - 1) * 5)
 
     return min(100, round(score)), {
         "liq": liq, "mcap": mcap, "vol24": vol24, "ch1": ch1, "ch6": ch6, "ch24": ch24,
@@ -830,10 +842,10 @@ def send_startup():
 
 
 CHANGELOG = [
-    ("⚡ Near-instant calls (v3.4)", "Confirmation window cut to 6 seconds. Strong high-score coins can clear in as little as 3 seconds. Goal: you see the call as soon as the bot decides it is good."),
-    ("🎯 Still only bullish + legit", "Safety filters stay strict (mint/freeze, holders, creator %, honeypot, insiders, LP). We only removed the artificial delay, not the quality bar."),
-    ("🚀 Early MC focus kept", "Still hunts 8 min+ coins with low but healthy liquidity/volume so you can enter early."),
-    ("🔥 Fresh data on every call", "Always re-fetches MC/price/liq right before the message is sent."),
+    ("🎯 High-conviction early runners (v3.5)", "Target ~10k MC entries that show real buy pressure, volume acceleration and clean distribution — the profile of coins that can realistically push toward 300k+."),
+    ("📈 Stronger momentum required", "1h buy/sell ratio must be clearly positive (1.18x+). Volume velocity and sustained buying are now heavily weighted in the score."),
+    ("🛡️ Higher quality bar", "MIN_SCORE 72 + MIN_LEGIT 70. Creator max 8%, cleaner top holders. Only the strongest early setups pass."),
+    ("⚡ Still near-instant", "5s confirmation. Fresh data fetch on every call. You get in early on the ones that actually look ready to run."),
 ]
 
 
