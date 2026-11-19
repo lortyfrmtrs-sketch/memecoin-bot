@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 """
-Valk's Insider Bot  v4.1.0
-Early Hunter + Reputation edition.
+Valk's Insider Bot  v4.2.0
+Balanced Early Hunter — actually produces calls again.
 
-Goal: Catch high-quality coins in the true early zone (roughly 5k–40k MC)
-that still have realistic room to run toward 200–500k, while strongly
-rejecting late/extended coins that damage reputation.
-
-Improvements in 4.1:
-- More aggressive discovery (more Solana pages + slightly faster cycle)
-- Hard MC ceiling $85k (still blocks 6-figure late calls)
-- Strong preference for under 40 min + under $35k
-- Still rejects already-pumped profiles hard
-- High safety standards kept
+Changes from v4.1:
+- Slightly loosened legit / holders / concentration so real early coins can pass
+- Kept hard $85k MC ceiling and strong already-pumped rejection (reputation protection)
+- Kept social requirement and critical rug blocks
+- Goal: start calling quality early coins again without going back to late dumps
 """
 
 import os
@@ -29,7 +24,7 @@ from collections import Counter
 # ======================================================
 BOT_NAME = "Valk's Insider Bot"
 CREDIT = "Created by @valk_ on Fomo"
-VERSION = "4.1.0"
+VERSION = "4.2.0"
 
 # ---- Discord webhooks (keep this file PRIVATE) ----
 WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
@@ -43,61 +38,61 @@ WEBHOOKS = {
     "results":  "https://discord.com/api/webhooks/1572558043541938297/97Rv4OO0feG5RGzv4lYBiVOrGr8NaQQZDb7FZ59L9H6rDp3-sfPPF4M_tQocYeT2YmUZ",
 }
 
-CHECK_INTERVAL = 14                  # faster cycle
+CHECK_INTERVAL = 14
 REALERT_AFTER = 4 * 3600
-RECHECK_REJECTED_AFTER = 420
-MAX_DEEP_CHECKS_PER_SCAN = 38
+RECHECK_REJECTED_AFTER = 400
+MAX_DEEP_CHECKS_PER_SCAN = 40
 STATUS_EVERY = 15 * 60
 SEND_STATUS = True
 SEND_RESULT_UPDATES = True
 VERSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".bot_version")
 
-# ---- Bullish filters — TRUE EARLY HUNTER ----
+# ---- Bullish filters ----
 MIN_PAIR_AGE_MIN = 5
-MAX_PAIR_AGE_MIN = 110               # slightly wider than 4.0 but still early
-MIN_LIQUIDITY_USD = 4_800
-MIN_VOLUME_24H = 5_200
-MIN_MARKET_CAP = 4_000
-MAX_MARKET_CAP = 85_000              # hard ceiling — still kills 6-figure late calls
-MIN_TXNS_24H = 42
-MIN_LIQ_TO_MCAP = 0.055
-MIN_BUY_SELL_RATIO_H1 = 1.18
-MAX_24H_PUMP_PCT = 320
-MAX_VOL_TO_LIQ = 45
-MIN_SCORE = 72
+MAX_PAIR_AGE_MIN = 120
+MIN_LIQUIDITY_USD = 4_500
+MIN_VOLUME_24H = 4_800
+MIN_MARKET_CAP = 3_800
+MAX_MARKET_CAP = 85_000              # hard ceiling kept
+MIN_TXNS_24H = 38
+MIN_LIQ_TO_MCAP = 0.05
+MIN_BUY_SELL_RATIO_H1 = 1.15
+MAX_24H_PUMP_PCT = 350
+MAX_VOL_TO_LIQ = 48
+MIN_SCORE = 68                       # lowered so real early coins can pass
 
-# ---- Legit filters — HIGH SAFETY ----
-MIN_LEGIT_SCORE = 76
-MAX_RUGCHECK_SCORE = 28
-MAX_TOP10_HOLDER_PCT = 36
-MIN_HOLDERS = 75
+# ---- Legit filters (slightly loosened) ----
+MIN_LEGIT_SCORE = 72                 # was 76
+MAX_RUGCHECK_SCORE = 32
+MAX_TOP10_HOLDER_PCT = 42            # was 36
+MIN_HOLDERS = 55                     # was 75
 MAX_INSIDERS_TOP10 = 1
-MAX_CREATOR_PCT = 5.0
-MAX_TRANSFER_FEE_PCT = 3
-MIN_LP_LOCKED_PCT = 55
-MAX_TAX_PCT = 6
-MIN_SOCIAL_LINKS = 1
+MAX_CREATOR_PCT = 7.0                # was 5
+MAX_TRANSFER_FEE_PCT = 3.5
+MIN_LP_LOCKED_PCT = 50
+MAX_TAX_PCT = 7
+MIN_SOCIAL_LINKS = 1                 # still required
 REQUIRE_WEBSITE_AND_SOCIAL = False
 REQUIRE_LIVE_SITE = False
 REQUIRE_NARRATIVE = False
-MIN_DESC_LEN = 10
+MIN_DESC_LEN = 8
 REQUIRE_SAFETY_DATA = True
 
 # ---- Live monitor ----
 WATCH_EVERY = 2
-CONFIRM_SECONDS = 3.5
-CONFIRM_MAX_LIQ_DROP = 0.19
-CONFIRM_MAX_PRICE_DROP = 0.19
+CONFIRM_SECONDS = 3.2
+CONFIRM_MAX_LIQ_DROP = 0.20
+CONFIRM_MAX_PRICE_DROP = 0.20
 MONITOR_HOURS = 5
-EXIT_LIQ_DROP = 0.25
-EXIT_PRICE_DROP = 0.29
-PEAK_PULLBACK = 0.19
+EXIT_LIQ_DROP = 0.26
+EXIT_PRICE_DROP = 0.30
+PEAK_PULLBACK = 0.20
 TAKE_PROFIT_X = (2, 3, 5, 10)
 CHECKPOINTS_H = (0.25, 1, 6, 24)
 
 CHAINS = {"solana", "base", "ethereum", "bsc"}
 GECKO_NETWORKS = {"solana": "solana", "base": "base", "eth": "ethereum", "bsc": "bsc"}
-GECKO_NEW_PAGES = {"solana": 9, "base": 3, "eth": 2, "bsc": 2}   # more Solana discovery
+GECKO_NEW_PAGES = {"solana": 9, "base": 3, "eth": 2, "bsc": 2}
 GOPLUS_CHAIN = {"ethereum": "1", "bsc": "56", "base": "8453"}
 GMGN_CHAIN = {"solana": "sol", "base": "base", "ethereum": "eth", "bsc": "bsc"}
 CHAIN_ICON = {"solana": "◎", "base": "🔵", "ethereum": "⟠", "bsc": "🟡"}
@@ -126,7 +121,7 @@ THEMES = {
                          "based", "tiktok", "anime", "gaming", "gamer", "vibes"},
 }
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ValkInsiderBot/4.1)", "Accept": "application/json"}
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ValkInsiderBot/4.2)", "Accept": "application/json"}
 DEX = "https://api.dexscreener.com"
 GECKO = "https://api.geckoterminal.com/api/v2"
 FOOTER = f"{BOT_NAME} • {CREDIT}"
@@ -158,19 +153,19 @@ def get_json(url, params=None, retries=3, timeout=11):
         try:
             r = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
             if r.status_code == 429:
-                sleep_for = 2.8 * (attempt + 1)
+                sleep_for = 2.6 * (attempt + 1)
                 print(f"  rate limited, sleeping {sleep_for:.1f}s")
                 time.sleep(sleep_for)
                 continue
             if r.status_code == 200:
                 return r.json()
             if r.status_code >= 500:
-                time.sleep(1.3)
+                time.sleep(1.2)
                 continue
             return None
         except Exception as e:
             print(f"  request error {url[:70]}...: {e}")
-            time.sleep(0.9 + attempt * 0.4)
+            time.sleep(0.8 + attempt * 0.4)
     return None
 
 
@@ -194,7 +189,7 @@ def score_bar(score, n=10):
 
 
 # ======================================================
-# 1) FIND COINS — more aggressive discovery
+# 1) FIND COINS
 # ======================================================
 def from_dexscreener_lists():
     found = set()
@@ -208,7 +203,7 @@ def from_dexscreener_lists():
                     found.add((chain, addr))
                     if t.get("description"):
                         profile_desc[f"{chain}:{addr}"] = t["description"]
-        time.sleep(0.35)
+        time.sleep(0.32)
     return found
 
 
@@ -226,7 +221,7 @@ def from_geckoterminal():
                     found.add((chain, base_id.split("_", 1)[1]))
                 except Exception:
                     continue
-            time.sleep(0.55)
+            time.sleep(0.50)
     return found
 
 
@@ -240,11 +235,11 @@ def from_dexscreener_search():
                 addr = (p.get("baseToken") or {}).get("address")
                 if chain in CHAINS and addr:
                     found.add((chain, addr))
-        time.sleep(0.25)
+        time.sleep(0.22)
     return found
 
 
-def fetch_pairs(candidates, pause=0.25):
+def fetch_pairs(candidates, pause=0.22):
     by_chain = {}
     for chain, addr in candidates:
         by_chain.setdefault(chain, []).append(addr)
@@ -268,7 +263,7 @@ def fetch_pairs(candidates, pause=0.25):
 
 
 # ======================================================
-# 2) BULLISH CHECK — EARLY HUNTER
+# 2) BULLISH CHECK
 # ======================================================
 def evaluate(pair, nsrc=1):
     liq = num((pair.get("liquidity") or {}).get("usd"))
@@ -291,27 +286,27 @@ def evaluate(pair, nsrc=1):
     if age_min is None or age_min < MIN_PAIR_AGE_MIN or age_min > MAX_PAIR_AGE_MIN:
         return None
 
-    # === Strong protection against late / already-pumped coins ===
-    if mcap > 32_000 and ch6 > 95:
+    # Still protect against late / already-pumped coins
+    if mcap > 35_000 and ch6 > 100:
         return None
-    if mcap > 42_000 and ch24 > 180:
+    if mcap > 48_000 and ch24 > 200:
         return None
-    if mcap > 55_000 and (ch6 > 70 or ch1 > 45):
+    if mcap > 60_000 and (ch6 > 80 or ch1 > 50):
         return None
-    if ch1 >= 120 and mcap > 28_000:
+    if ch1 >= 130 and mcap > 30_000:
         return None
-    if ch5 >= 48 and mcap > 25_000:
+    if ch5 >= 55 and mcap > 28_000:
         return None
 
-    # Age-aware volume & txns
+    # Age-aware volume / txns
     min_vol = MIN_VOLUME_24H
     min_tx = MIN_TXNS_24H
-    if age_min is not None and age_min < 16:
-        min_vol = max(2600, MIN_VOLUME_24H * 0.48)
-        min_tx = max(26, MIN_TXNS_24H * 0.48)
-    elif age_min is not None and age_min < 28:
-        min_vol = max(3600, MIN_VOLUME_24H * 0.68)
-        min_tx = max(34, MIN_TXNS_24H * 0.68)
+    if age_min is not None and age_min < 18:
+        min_vol = max(2400, MIN_VOLUME_24H * 0.45)
+        min_tx = max(24, MIN_TXNS_24H * 0.45)
+    elif age_min is not None and age_min < 32:
+        min_vol = max(3400, MIN_VOLUME_24H * 0.65)
+        min_tx = max(32, MIN_TXNS_24H * 0.65)
 
     if vol24 < min_vol:
         return None
@@ -321,70 +316,68 @@ def evaluate(pair, nsrc=1):
         return None
     if liq and vol24 / liq > MAX_VOL_TO_LIQ:
         return None
-    if ch24 > MAX_24H_PUMP_PCT or ch1 < -9 or ch24 < -38:
+    if ch24 > MAX_24H_PUMP_PCT or ch1 < -10 or ch24 < -40:
         return None
-    if liq > 0 and vol1 > 0 and vol1 / liq > 9:
+    if liq > 0 and vol1 > 0 and vol1 / liq > 9.5:
         return None
 
     ratio1 = b1 / max(s1, 1)
     ratio24 = b24 / max(s24, 1)
     ratio5 = b5 / max(s5, 1)
 
-    if ratio1 < MIN_BUY_SELL_RATIO_H1 or ratio24 < 0.82:
+    if ratio1 < MIN_BUY_SELL_RATIO_H1 or ratio24 < 0.80:
         return None
-    if (b5 + s5) >= 9 and ratio5 < 0.68:
+    if (b5 + s5) >= 8 and ratio5 < 0.65:
         return None
-    if b24 > 85 and s24 == 0:
+    if b24 > 90 and s24 == 0:
         return None
 
-    # --- Score (rewards true early hard) ---
+    # Score
     score = 0
-    score += min(26, ratio1 * 11)
-    score += min(11, ratio5 * 5) if (b5 + s5) >= 4 else 0
-    score += min(10, max(0, (ratio24 - 1) * 16))
-    score += 10 if ch5 >= 3 else (6 if ch5 >= 0 else 0)
-    score += 11 if ch1 >= 8 else (7 if ch1 > 0 else 0)
+    score += min(25, ratio1 * 10.5)
+    score += min(10, ratio5 * 4.8) if (b5 + s5) >= 4 else 0
+    score += min(10, max(0, (ratio24 - 1) * 15))
+    score += 9 if ch5 >= 2.5 else (5 if ch5 >= 0 else 0)
+    score += 10 if ch1 >= 7 else (6 if ch1 > 0 else 0)
     score += 5 if ch6 > 0 else 0
-    score += 7 if 8 <= ch24 <= 250 else (3 if ch24 > 0 else 0)
+    score += 6 if 5 <= ch24 <= 280 else (2 if ch24 > 0 else 0)
 
     vol_accel = (vol1 * 24 / max(vol24, 1)) if vol24 else 0
-    score += min(12, vol_accel * 6)
+    score += min(11, vol_accel * 5.5)
 
     liq_ratio = liq / max(mcap, 1)
-    score += min(11, liq_ratio * 115)
-    score += 6 if liq >= 13_000 else (3 if liq >= 7_000 else 0)
+    score += min(10, liq_ratio * 110)
+    score += 5 if liq >= 12_000 else (2 if liq >= 6_500 else 0)
 
     info = pair.get("info") or {}
     score += 5 if info.get("socials") else 0
     score += 3 if info.get("websites") else 0
 
-    # Age is the biggest lever for 5k→500k potential
     if age_min is not None:
-        if 5 <= age_min <= 20:
-            score += 19
-        elif 20 < age_min <= 35:
-            score += 12
-        elif 35 < age_min <= 55:
-            score += 6
+        if 5 <= age_min <= 22:
+            score += 17
+        elif 22 < age_min <= 40:
+            score += 10
+        elif 40 < age_min <= 65:
+            score += 5
         else:
             score += 1
 
-    # Lower MC gets clear bonus
-    if mcap < 15_000:
-        score += 9
-    elif mcap < 28_000:
-        score += 5
-    elif mcap > 55_000:
-        score -= 7
+    if mcap < 16_000:
+        score += 8
+    elif mcap < 30_000:
+        score += 4
+    elif mcap > 58_000:
+        score -= 6
 
-    score += min(9, (nsrc - 1) * 4)
+    score += min(8, (nsrc - 1) * 3.5)
 
-    if ch1 > 75 or ch5 > 28:
-        score = min(score, 83)
-    if mcap > 50_000:
-        score = min(score, 81)
+    if ch1 > 80 or ch5 > 30:
+        score = min(score, 84)
+    if mcap > 55_000:
+        score = min(score, 82)
 
-    return min(94, round(score)), {
+    return min(93, round(score)), {
         "liq": liq, "mcap": mcap, "vol24": vol24, "ch1": ch1, "ch6": ch6, "ch24": ch24,
         "ratio1": ratio1, "ratio5": ratio5, "age_min": age_min, "txns": b24 + s24, "nsrc": nsrc,
     }
@@ -441,7 +434,7 @@ def rugcheck_solana(mint):
     top1 = num(holders[0].get("pct")) if holders else 0.0
     if top10 > MAX_TOP10_HOLDER_PCT:
         reasons.append(f"top 10 hold {top10:.0f}%")
-    if top1 >= 17:
+    if top1 >= 19:
         reasons.append(f"top wallet holds {top1:.0f}% (too concentrated)")
     insiders = sum(1 for h in holders[:10] if h.get("insider"))
     if insiders > MAX_INSIDERS_TOP10:
@@ -536,11 +529,11 @@ def goplus_check(chain, addr):
 def fetch_site_blurb(url):
     try:
         r = requests.get(url, headers=HEADERS, timeout=6)
-        html = r.text[:110_000]
+        html = r.text[:100_000]
         title = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
         desc = re.search(r'<meta[^>]+(?:name|property)=["\'](?:og:)?description["\'][^>]+content=["\'](.*?)["\']', html, re.I | re.S)
         parts = [re.sub(r"\s+", " ", x.group(1)).strip() for x in (title, desc) if x]
-        return " — ".join(parts)[:280]
+        return " — ".join(parts)[:260]
     except Exception:
         return ""
 
@@ -548,7 +541,7 @@ def fetch_site_blurb(url):
 def site_alive(url):
     try:
         r = requests.get(url, headers=HEADERS, timeout=6, allow_redirects=True)
-        return r.status_code < 400 and len(r.text) > 120
+        return r.status_code < 400 and len(r.text) > 100
     except Exception:
         return False
 
@@ -574,9 +567,9 @@ def copycat_check(pair):
         their_created = p.get("pairCreatedAt") or 0
         label = f"{b.get('name')} (${b.get('symbol')}) {str(b.get('address'))[:6]}…"
         if p.get("chainId") == chain:
-            if their_liq > my_liq * 1.5:
+            if their_liq > my_liq * 1.6:
                 return f"copycat: bigger coin with same name exists: {label}"
-            if their_created and their_created < my_created - 3_600_000 and their_liq >= MIN_LIQUIDITY_USD * 0.4:
+            if their_created and their_created < my_created - 3_600_000 and their_liq >= MIN_LIQUIDITY_USD * 0.35:
                 return f"copycat: older coin with same name exists: {label}"
         elif their_liq > 80_000 and their_created and their_created < my_created - 86_400_000:
             return f"impersonating established coin: {label}"
@@ -593,7 +586,7 @@ def read_coin(name, symbol, desc, site_blurb):
         bits.append("/".join(labels) + " theme")
     else:
         bits.append("no clear theme")
-    if len((desc or "").strip()) >= 30:
+    if len((desc or "").strip()) >= 25:
         bonus += 3
         bits.append("clear description")
     if site_blurb:
@@ -601,7 +594,7 @@ def read_coin(name, symbol, desc, site_blurb):
         bits.append("live website")
     d = (desc or "").strip()
     letters = sum(c.isalpha() for c in d)
-    if len(d) > 20 and (d.count("!") > 5 or (letters and sum(c.isupper() for c in d) / letters > 0.70)):
+    if len(d) > 18 and (d.count("!") > 5 or (letters and sum(c.isupper() for c in d) / letters > 0.72)):
         bonus -= 4
         bits.append("shilly wording")
     return " • ".join(bits), bonus
@@ -614,53 +607,53 @@ def build_legit(chain, f, extra):
     def item(group, label, val, got, mx):
         nonlocal s
         s += got
-        lines.append(("✅" if got >= mx * 0.65 else "⚠️", label, val, group))
+        lines.append(("✅" if got >= mx * 0.6 else "⚠️", label, val, group))
 
     if chain == "solana":
         lp = f["lp_locked"]
         item("contract", "Mint authority", "renounced" if f["mint_ren"] else "NOT renounced", 10 if f["mint_ren"] else 0, 10)
         item("contract", "Freeze authority", "renounced" if f["freeze_ren"] else "NOT renounced", 10 if f["freeze_ren"] else 0, 10)
         item("contract", "Liquidity locked/burned", "n/a" if lp is None else f"{lp:.0f}%",
-             5 if lp is None else (15 if lp >= 90 else 10 if lp >= 60 else 4 if lp >= 40 else 0), 15)
+             5 if lp is None else (14 if lp >= 85 else 9 if lp >= 55 else 3 if lp >= 35 else 0), 14)
         rs = f["risk_score"]
         item("contract", "RugCheck risk score", "n/a" if rs is None else f"{rs:.0f}/100 (lower is safer)",
-             5 if rs is None else (10 if rs <= 12 else 7 if rs <= 25 else 2 if rs <= 35 else 0), 10)
-        lines.append(("✅" if f["transfer_fee"] <= 1 else "⚠️", "Transfer fee", f"{f['transfer_fee']:.0f}%", "contract"))
+             5 if rs is None else (10 if rs <= 15 else 6 if rs <= 28 else 2 if rs <= 38 else 0), 10)
+        lines.append(("✅" if f["transfer_fee"] <= 1.5 else "⚠️", "Transfer fee", f"{f['transfer_fee']:.0f}%", "contract"))
         h = f["holders"]
-        item("holders", "Holders", str(h), 10 if h >= 350 else 7 if h >= 120 else 4 if h >= 70 else 0, 10)
+        item("holders", "Holders", str(h), 10 if h >= 250 else 6 if h >= 90 else 3 if h >= 50 else 0, 10)
         t10 = f["top10"]
         item("holders", "Top 10 wallets", f"{t10:.0f}% (largest {f['top1']:.0f}%)",
-             10 if t10 <= 28 else 7 if t10 <= 36 else 3 if t10 <= 46 else 0, 10)
+             10 if t10 <= 30 else 6 if t10 <= 42 else 2 if t10 <= 52 else 0, 10)
         cp = f["creator_pct"]
         item("holders", "Creator holding", "n/a" if cp is None else f"{cp:.1f}%",
-             5 if cp is None else (10 if cp <= 3 else 6 if cp <= 6 else 2 if cp <= 10 else 0), 10)
+             5 if cp is None else (9 if cp <= 3.5 else 5 if cp <= 7 else 1 if cp <= 12 else 0), 9)
         ins = f["insiders"] + (1 if f["insider_network"] else 0) + len(f.get("bundle_flags") or [])
         item("holders", "Insiders / bundles", "none detected" if ins == 0 else f"{ins} flagged",
-             10 if ins == 0 else 4 if ins == 1 else 0, 10)
+             9 if ins == 0 else 3 if ins == 1 else 0, 9)
         if f.get("warnings"):
             lines.append(("⚠️", "RugCheck warnings", ", ".join(f["warnings"][:3]), "contract"))
     else:
         tax = max(f["buy_tax"], f["sell_tax"])
-        item("contract", "Honeypot test", "passed (can sell)", 15, 15)
+        item("contract", "Honeypot test", "passed (can sell)", 14, 14)
         item("contract", "Buy / sell tax", f"{f['buy_tax']:.0f}% / {f['sell_tax']:.0f}%",
-             10 if tax <= 3 else 5 if tax <= 7 else 0, 10)
-        item("contract", "Contract source", "verified" if f["open_source"] else "unverified", 10 if f["open_source"] else 0, 10)
-        item("contract", "Ownership", "renounced" if f["owner_ren"] else "owner active", 10 if f["owner_ren"] else 3, 10)
-        item("contract", "Dangerous functions", "none (mint / blacklist / pause / hidden owner)", 10, 10)
+             9 if tax <= 4 else 4 if tax <= 8 else 0, 9)
+        item("contract", "Contract source", "verified" if f["open_source"] else "unverified", 9 if f["open_source"] else 0, 9)
+        item("contract", "Ownership", "renounced" if f["owner_ren"] else "owner active", 9 if f["owner_ren"] else 2, 9)
+        item("contract", "Dangerous functions", "none (mint / blacklist / pause / hidden owner)", 9, 9)
         lp = f["lp_locked"]
-        item("contract", "Liquidity locked", f"{lp:.0f}%", 5 if lp >= 55 else 2 if lp >= 25 else 0, 5)
+        item("contract", "Liquidity locked", f"{lp:.0f}%", 4 if lp >= 50 else 1 if lp >= 20 else 0, 4)
         h = f["holders"]
-        item("holders", "Holders", str(h), 10 if h >= 350 else 7 if h >= 120 else 4 if h >= 70 else 0, 10)
+        item("holders", "Holders", str(h), 9 if h >= 250 else 5 if h >= 90 else 2 if h >= 50 else 0, 9)
         t10 = f["top10"]
         item("holders", "Top wallets (excl. contracts)", f"{t10:.0f}%",
-             10 if t10 <= 28 else 7 if t10 <= 36 else 3 if t10 <= 46 else 0, 10)
+             9 if t10 <= 30 else 5 if t10 <= 42 else 1 if t10 <= 52 else 0, 9)
         cp = f["creator_pct"]
-        item("holders", "Creator holding", f"{cp:.1f}%", 5 if cp <= 3 else 3 if cp <= 6 else 1 if cp <= 10 else 0, 5)
+        item("holders", "Creator holding", f"{cp:.1f}%", 4 if cp <= 3.5 else 2 if cp <= 7 else 0, 4)
 
     item("project", "Website", "live" if extra["site_ok"] else ("present" if extra.get("has_site") else "none"),
          3 if extra["site_ok"] else (1 if extra.get("has_site") else 0), 3)
     item("project", "Social accounts", str(extra["socials"]), 4 if extra["socials"] >= 1 else 0, 4)
-    item("project", "Description", "clear" if extra["desc_ok"] else "thin / meme", 4 if extra["desc_ok"] else 2, 4)
+    item("project", "Description", "clear" if extra["desc_ok"] else "thin / meme", 3 if extra["desc_ok"] else 1, 3)
     item("project", "Copycat check", "original", 5, 5)
     return s, lines
 
@@ -680,14 +673,14 @@ def deep_check(pair, d):
 
     mcap = d.get("mcap") or 0
     facts = safety["facts"]
-    if mcap < 22_000:
-        if facts.get("creator_pct") is not None and facts["creator_pct"] > 6:
+    if mcap < 20_000:
+        if facts.get("creator_pct") is not None and facts["creator_pct"] > 8:
             return False, f"low-MC creator still holds {facts['creator_pct']:.0f}%", None
-        if facts.get("top10") and facts["top10"] > 40:
+        if facts.get("top10") and facts["top10"] > 48:
             return False, f"low-MC top10 holds {facts['top10']:.0f}%", None
         if facts.get("insider_network"):
             return False, "low-MC + insider network", None
-        if facts.get("holders") and facts["holders"] < 85:
+        if facts.get("holders") and facts["holders"] < 60:
             return False, f"low-MC only {facts['holders']} holders", None
 
     fake = copycat_check(pair)
@@ -706,7 +699,7 @@ def deep_check(pair, d):
         return False, "website doesn't load", None
 
     desc = (profile_desc.get(key) or safety.get("desc") or "").strip()
-    site_blurb = fetch_site_blurb(sites[0]) if sites and len(desc) < MIN_DESC_LEN + 12 else ""
+    site_blurb = fetch_site_blurb(sites[0]) if sites and len(desc) < MIN_DESC_LEN + 10 else ""
     context = " ".join([base.get("name", ""), base.get("symbol", ""), desc, site_blurb])
     hit = RED_RE.findall(context)
     if hit:
@@ -734,14 +727,14 @@ def deep_check(pair, d):
 # 4) DISCORD
 # ======================================================
 def tier(score):
-    if score >= 85: return "🔱 S-TIER"
-    if score >= 75: return "🥇 A-TIER"
+    if score >= 84: return "🔱 S-TIER"
+    if score >= 74: return "🥇 A-TIER"
     return "🥈 B-TIER"
 
 
 def risk_label(legit):
-    if legit >= 86: return "VERY LOW RISK"
-    if legit >= 76: return "LOW RISK"
+    if legit >= 84: return "VERY LOW RISK"
+    if legit >= 72: return "LOW RISK"
     return "MODERATE RISK"
 
 
@@ -819,7 +812,7 @@ def build_embed(pair, score, d, deep):
         "title": f"{base.get('name', '?')}  (${base.get('symbol', '?')})",
         "url": pair.get("url"),
         "description": desc,
-        "color": 0x00FF99 if score >= 85 else (0x2ECC71 if score >= 75 else 0x3498DB),
+        "color": 0x00FF99 if score >= 84 else (0x2ECC71 if score >= 74 else 0x3498DB),
         "fields": fields,
         "footer": {"text": FOOTER + " • Nothing is guaranteed • DYOR"},
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -893,7 +886,7 @@ def send_embeds(embeds, content=None, channel="callouts"):
         except Exception as ex:
             ok = False
             print(f"Discord send error ({channel}): {ex}")
-        time.sleep(0.38)
+        time.sleep(0.35)
     return ok
 
 
@@ -908,25 +901,24 @@ def send_startup():
             f"MAX MC     ${MAX_MARKET_CAP:,} hard ceiling\n"
             f"SCAN       every {CHECK_INTERVAL}s\n"
             f"MIN SCORE  Bullish ≥{MIN_SCORE}  •  Legit ≥{MIN_LEGIT_SCORE}\n"
-            "MODE       Early Hunter + Reputation\n"
+            "MODE       Balanced Early + Reputation\n"
             "```"
         ),
         "color": 0x00FF99,
         "fields": [
-            {"name": "🔍 Detection", "value": "More Solana discovery pages + faster cycle. Focused on the real early zone (5k–40k).", "inline": False},
-            {"name": "🛡️ Safety + Timing", "value": "Hard $85k MC ceiling • Rejects already-pumped coins • Strong preference for under 40 min • High legit standards", "inline": False},
+            {"name": "🔍 Detection", "value": "Aggressive early discovery with hard $85k MC ceiling and strong already-pumped rejection.", "inline": False},
+            {"name": "🛡️ Safety", "value": "Legit ≥72 • Holders ≥55 • Top10 ≤42% • Creator ≤7% • Social required • Critical rug flags blocked", "inline": False},
             {"name": "📊 Accountability", "value": "Every call tracked. Results posted 15m / 1h / 6h / 24h.", "inline": False},
             {"name": "🧪 Debug channel", "value": "Near-misses + scan stats so you can see the bot working.", "inline": False},
         ],
-        "footer": {"text": FOOTER + " • only early + clean coins reach callouts"},
+        "footer": {"text": FOOTER + " • early + clean coins only"},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }])
 
 
 CHANGELOG = [
-    ("🎯 v4.1 Early Hunter", "More aggressive discovery (9 Solana Gecko pages + faster cycle). Hard MC ceiling $85k. Strong preference for under 40 min + under $35k. Still rejects late/extended coins hard."),
-    ("🛡️ Reputation protected", "DacityCat-style late calls blocked. Critical rug flags, concentration, creator, and social requirements kept high."),
-    ("📈 Still aims for big runners", "Age + low-MC bonuses heavily reward the true 5k–30k zone that can realistically go much higher."),
+    ("🔄 v4.2 Balanced", "Slightly loosened legit/holders/concentration so real early coins can pass again. Kept hard $85k MC ceiling and strong already-pumped rejection."),
+    ("🎯 Goal", "Start producing quality early calls again without returning to late dumps that hurt reputation."),
 ]
 
 
@@ -1046,7 +1038,7 @@ def check_pending(key, live, now):
         state["rejected"][key] = now
         print(f"  ✗ {sym}: failed live confirmation (liq/price dropping)")
         return
-    min_wait = 2.2 if pend.get("deep", {}).get("legit", 0) >= 78 and pend.get("final_est", 70) >= 74 else CONFIRM_SECONDS
+    min_wait = 2.0 if pend.get("deep", {}).get("legit", 0) >= 76 and pend.get("final_est", 68) >= 72 else CONFIRM_SECONDS
     if now - pend["t0"] < min_wait:
         return
     state["pending"].pop(key, None)
@@ -1074,7 +1066,7 @@ def check_called(key, t, live):
         return
     change = (price / entry - 1) * 100
     liq_drop = (1 - liq / t["liq0"]) if t.get("liq0") else 0
-    rugged = liq < 1100 or liq_drop >= 0.58
+    rugged = liq < 1000 or liq_drop >= 0.58
 
     if rugged or liq_drop >= EXIT_LIQ_DROP or price <= entry * (1 - EXIT_PRICE_DROP):
         t["exit_sent"] = True
@@ -1100,7 +1092,7 @@ def check_called(key, t, live):
                 content=f"💰 **{x}x: {t['name']}** (${t['symbol']})  `{t['addr']}`", channel="profit")
 
     peak_gain = (t["peak"] / entry - 1) * 100
-    if peak_gain >= 16 and not t.get("pullback_sent") and price <= t["peak"] * (1 - PEAK_PULLBACK):
+    if peak_gain >= 15 and not t.get("pullback_sent") and price <= t["peak"] * (1 - PEAK_PULLBACK):
         t["pullback_sent"] = True
         send_embeds([live_embed(
             t, f"⚠️ PULLBACK: {t['name']} is down {PEAK_PULLBACK * 100:.0f}% from its peak",
@@ -1155,7 +1147,7 @@ def track_results():
             continue
         price = num(p.get("priceUsd"))
         liq = num((p.get("liquidity") or {}).get("usd"))
-        pulled = liq < 1100
+        pulled = liq < 1000
         change = -100.0 if pulled else ((price / t["price"] - 1) * 100 if t["price"] else 0)
         t["reported"].append(h)
         if h == CHECKPOINTS_H[-1] or pulled:
@@ -1184,7 +1176,7 @@ def track_results():
 # ======================================================
 def post_scan_report(candidates, passed_market, deep_checked, rejects, queued):
     now = time.time()
-    if now - state.get("last_reject_post", 0) < 65:
+    if now - state.get("last_reject_post", 0) < 60:
         return
     state["last_reject_post"] = now
 
@@ -1192,7 +1184,7 @@ def post_scan_report(candidates, passed_market, deep_checked, rejects, queued):
     near = []
     for r in rejects:
         reason_counts[r["reason"].split(":")[0][:40]] += 1
-        if r.get("bullish", 0) >= MIN_SCORE - 6:
+        if r.get("bullish", 0) >= MIN_SCORE - 5:
             near.append(r)
 
     lines = [
@@ -1221,7 +1213,7 @@ def post_scan_report(candidates, passed_market, deep_checked, rejects, queued):
 
     fields.append({
         "name": "ℹ️ Note",
-        "value": "Only coins that pass **early timing + high safety** reach #callouts.",
+        "value": "Only coins that pass early timing + safety checks reach #callouts.",
         "inline": False
     })
 
@@ -1257,10 +1249,10 @@ def check_for_tokens():
             continue
         chain, addr = key.split(":", 1)
         ev = evaluate(pair, nsrc.get((chain, addr), 1))
-        if ev and ev[0] >= MIN_SCORE - 10:
+        if ev and ev[0] >= MIN_SCORE - 8:
             results.append((ev[0], key, pair, ev[1]))
     results.sort(key=lambda x: x[0], reverse=True)
-    print(f"  {len(results)} passed market filters (score ≥ ~{MIN_SCORE-10})")
+    print(f"  {len(results)} passed market filters (score ≥ ~{MIN_SCORE-8})")
 
     rejects = []
     queued, checked = 0, 0
