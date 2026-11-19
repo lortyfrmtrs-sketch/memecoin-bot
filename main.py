@@ -21,7 +21,7 @@ from collections import Counter
 # ======================================================
 BOT_NAME = "Valk's Insider Bot"
 CREDIT = "Created by @valk_ on Fomo"
-VERSION = "4.3.0"                # bump this when you add something new, it posts to the Updates channel
+VERSION = "4.3.1"                # bump this when you add something new, it posts to the Updates channel
 
 # ---- Discord webhooks (keep this file PRIVATE) ----
 WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
@@ -48,33 +48,33 @@ VERSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".bot_ve
 # ---- Bullish filters (market) — RELAXED for early low-MC winners ----
 MIN_PAIR_AGE_MIN = 8             # v3.3: very early (still avoid the absolute first 1-2 min snipers)
 MAX_PAIR_AGE_MIN = 240           # v3.3: focus on fresher coins (up to 4h)
-MIN_LIQUIDITY_USD = 4_200        # v4.3: allow real early entries
-MIN_VOLUME_24H = 6_500           # v4.3: early volume ok
+MIN_LIQUIDITY_USD = 2_800        # v4.3.1: real early 5k zone
+MIN_VOLUME_24H = 3_500           # v4.3.1: early volume
 MIN_MARKET_CAP = 4_500           # v4.3: true 5k zone
 MAX_MARKET_CAP = 900_000         # v4.3: focus on coins with room to 200k+
-MIN_TXNS_24H = 55                # v4.3: early activity
-MIN_LIQ_TO_MCAP = 0.04           # v4.3: realistic for 5k MC
-MIN_BUY_SELL_RATIO_H1 = 1.08     # v4.3: clear buying but not impossible
+MIN_TXNS_24H = 30                # v4.3.1: early activity
+MIN_LIQ_TO_MCAP = 0.025          # v4.3.1: realistic for 5k
+MIN_BUY_SELL_RATIO_H1 = 1.02     # v4.3.1: net buying is enough
 MAX_24H_PUMP_PCT = 700           # v4.3: allow strong early moves
 MAX_VOL_TO_LIQ = 50              # was 40
-MIN_SCORE = 66                   # v4.3: early coins can pass again
+MIN_SCORE = 58                   # v4.3.1: let early coins reach deep check
 
 # ---- Legit filters (health check) — still strict to protect reputation ----
-MIN_LEGIT_SCORE = 68             # v4.3: still solid safety, not silent
-MAX_RUGCHECK_SCORE = 35          # v3.6: stricter risk score
-MAX_TOP10_HOLDER_PCT = 48        # v4.3: early coins are more concentrated
-MIN_HOLDERS = 40                 # v4.3: early 5k coins have fewer holders
+MIN_LEGIT_SCORE = 58             # v4.3.1: safety still present, not silent
+MAX_RUGCHECK_SCORE = 55          # v4.3.1: only fail clear high-risk
+MAX_TOP10_HOLDER_PCT = 55        # v4.3.1: early distribution
+MIN_HOLDERS = 25                 # v4.3.1: very early coins
 MAX_INSIDERS_TOP10 = 1           # v3.6: max 1 insider-linked in top 10
-MAX_CREATOR_PCT = 9              # v4.3: still light, not impossible
+MAX_CREATOR_PCT = 12             # v4.3.1: still limited
 MAX_TRANSFER_FEE_PCT = 3         # v3.6: lower tax tolerance
-MIN_LP_LOCKED_PCT = 50           # v3.6: prefer clearer LP lock when data exists
+MIN_LP_LOCKED_PCT = 0            # v4.3.1: many early pump.fun coins lock later – do not hard fail
 MAX_TAX_PCT = 6                  # v3.6: stricter tax/honeypot tolerance
-MIN_SOCIAL_LINKS = 1             # keep 1 but we will enforce more carefully at low MC
+MIN_SOCIAL_LINKS = 0             # v4.3.1: pure memes often have no socials yet
 REQUIRE_WEBSITE_AND_SOCIAL = False  # was True → many pure memes only have Twitter
 REQUIRE_LIVE_SITE = False        # was True → don't kill a coin just because site is slow
 REQUIRE_NARRATIVE = False        # was True → pure memes often have short descriptions
 MIN_DESC_LEN = 15                # was 30
-REQUIRE_SAFETY_DATA = True
+REQUIRE_SAFETY_DATA = False      # v4.3.1: do not kill the whole coin if one API is down
 
 # ---- Live monitor ----
 WATCH_EVERY = 2
@@ -627,16 +627,14 @@ def deep_check(pair, d):
     if not safety["ok"] or not safety["facts"]:
         return False, "; ".join(safety["reasons"]) or "no safety data", None
 
-    # v3.6 extra safety: at very low MC demand cleaner profile
+    # v4.3.1: light extra caution at low MC, but do not silence the bot
     mcap = d.get("mcap") or 0
-    facts = safety["facts"]
-    if mcap < 25_000:
-        if facts.get("creator_pct") is not None and facts["creator_pct"] > 5:
+    facts = safety.get("facts") or {}
+    if mcap < 20_000 and facts:
+        if facts.get("creator_pct") is not None and facts["creator_pct"] > 15:
             return False, f"low-MC creator still holds {facts['creator_pct']:.0f}%", None
-        if facts.get("top10") and facts["top10"] > 38:
-            return False, f"low-MC top10 holds {facts['top10']:.0f}%", None
-        if facts.get("insider_network"):
-            return False, "low-MC + insider network", None
+        if facts.get("insider_network") and facts.get("top10", 0) > 50:
+            return False, "low-MC + insider network + heavy top10", None
 
     fake = copycat_check(pair)
     if fake:
@@ -645,7 +643,7 @@ def deep_check(pair, d):
     info = pair.get("info") or {}
     sites = [w.get("url") for w in info.get("websites") or [] if w.get("url")]
     socials = [s.get("url") for s in info.get("socials") or [] if s.get("url")]
-    if len(sites) + len(socials) < MIN_SOCIAL_LINKS:
+    if MIN_SOCIAL_LINKS > 0 and len(sites) + len(socials) < MIN_SOCIAL_LINKS:
         return False, "no website/socials (can't verify it's real)", None
     if REQUIRE_WEBSITE_AND_SOCIAL and (not sites or not socials):
         return False, "needs both a website and a social account", None
@@ -872,10 +870,10 @@ def send_startup():
 
 
 CHANGELOG = [
-    ("🔄 v4.3 – Calls are back", "Filters were too strict after LuciASS and the bot went silent. Rebalanced so real early ~5k MC coins with buy pressure can pass again."),
-    ("🎯 Early runner focus", "Primary target: 5–15k MC with room toward 200k+. Higher MC still possible but not the main hunt."),
-    ("🛡️ Safety kept, not crippled", "Mint/freeze, creator %, top holders, danger risks and honeypot checks stay active. Only the over-tight market gates were loosened."),
-    ("⚡ Still fast", "Short confirmation + fresh MC/price fetch on every call."),
+    ("🔧 v4.3.1 – Silence fix", "Bot was still too strict (LP lock, socials, RugCheck score, holder floors). Loosened the gates that were blocking almost every early pump.fun coin."),
+    ("🎯 Early 5k focus", "Now properly targets low-MC coins with net buying pressure and room to run."),
+    ("🛡️ Core safety kept", "Mint/freeze authority, honeypot, high creator %, danger-level risks still reject. Softened only the rules that made the bot go silent."),
+    ("⚡ Ready to call again", "Should start posting real early candidates once redeployed."),
 ]
 
 
