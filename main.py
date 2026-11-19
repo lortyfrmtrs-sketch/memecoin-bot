@@ -21,7 +21,7 @@ from collections import Counter
 # ======================================================
 BOT_NAME = "Valk's Insider Bot"
 CREDIT = "Created by @valk_ on Fomo"
-VERSION = "4.4.0"                # bump this when you add something new, it posts to the Updates channel
+VERSION = "4.5.0"                # bump this when you add something new, it posts to the Updates channel
 
 # ---- Discord webhooks (keep this file PRIVATE) ----
 WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
@@ -46,26 +46,26 @@ SEND_RESULT_UPDATES = True
 VERSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".bot_version")
 
 # ---- Bullish filters (market) — RELAXED for early low-MC winners ----
-MIN_PAIR_AGE_MIN = 3             # v4.4: very early entries
+MIN_PAIR_AGE_MIN = 4             # v4.5
 MAX_PAIR_AGE_MIN = 240           # v3.3: focus on fresher coins (up to 4h)
-MIN_LIQUIDITY_USD = 1_500        # v4.4: allow real early entries
-MIN_VOLUME_24H = 1_500           # v4.4
+MIN_LIQUIDITY_USD = 2_500        # v4.5
+MIN_VOLUME_24H = 3_000           # v4.5
 MIN_MARKET_CAP = 4_500           # v4.3: true 5k zone
 MAX_MARKET_CAP = 900_000         # v4.3: focus on coins with room to 200k+
-MIN_TXNS_24H = 15                # v4.4
+MIN_TXNS_24H = 25                # v4.5
 MIN_LIQ_TO_MCAP = 0.015          # v4.4
-MIN_BUY_SELL_RATIO_H1 = 0.95     # v4.4: allow slight sell pressure if overall healthy
+MIN_BUY_SELL_RATIO_H1 = 1.05     # v4.5: need net buying
 MAX_24H_PUMP_PCT = 700           # v4.3: allow strong early moves
 MAX_VOL_TO_LIQ = 50              # was 40
-MIN_SCORE = 45                   # v4.4: get coins into the pipeline
+MIN_SCORE = 62                   # v4.5: cut the spam
 
 # ---- Legit filters (health check) — still strict to protect reputation ----
-MIN_LEGIT_SCORE = 45             # v4.4: only block clear junk
+MIN_LEGIT_SCORE = 60             # v4.5: cleaner calls only
 MAX_RUGCHECK_SCORE = 55          # v4.3.1: only fail clear high-risk
-MAX_TOP10_HOLDER_PCT = 65        # v4.4
-MIN_HOLDERS = 12                 # v4.4
+MAX_TOP10_HOLDER_PCT = 55        # v4.5
+MIN_HOLDERS = 20                 # v4.5
 MAX_INSIDERS_TOP10 = 1           # v3.6: max 1 insider-linked in top 10
-MAX_CREATOR_PCT = 18             # v4.4: still capped
+MAX_CREATOR_PCT = 12             # v4.5
 MAX_TRANSFER_FEE_PCT = 3         # v3.6: lower tax tolerance
 MIN_LP_LOCKED_PCT = 0            # v4.3.1: many early pump.fun coins lock later – do not hard fail
 MAX_TAX_PCT = 6                  # v3.6: stricter tax/honeypot tolerance
@@ -78,7 +78,7 @@ REQUIRE_SAFETY_DATA = False      # v4.3.1: do not kill the whole coin if one API
 
 # ---- Live monitor ----
 WATCH_EVERY = 2
-CONFIRM_SECONDS = 4              # v4.4: almost instant
+CONFIRM_SECONDS = 6              # v4.5
 CONFIRM_MAX_LIQ_DROP = 0.18      # slightly more tolerant in the 6s window
 CONFIRM_MAX_PRICE_DROP = 0.18
 MONITOR_HOURS = 6
@@ -277,6 +277,9 @@ def evaluate(pair, nsrc=1):
     if not (MIN_MARKET_CAP <= mcap <= MAX_MARKET_CAP):
         return None
     if age_min is None or age_min < MIN_PAIR_AGE_MIN or age_min > MAX_PAIR_AGE_MIN:
+        return None
+    # v4.5: if still under ~20k MC after 10 minutes, skip (dead / no traction)
+    if age_min >= 10 and mcap < 20_000:
         return None
     if (b24 + s24) < MIN_TXNS_24H or (mcap and liq / mcap < MIN_LIQ_TO_MCAP):
         return None
@@ -882,10 +885,10 @@ def send_startup():
 
 
 CHANGELOG = [
-    ("🚀 v4.4 – Force calls through", "Aggressively opened market + safety gates so early ~5k MC coins actually get posted. Only critical risks (honeypot, mint/freeze still active, already rugged, clear danger) still hard-reject."),
-    ("📡 Wider discovery", "More search terms + much wider score funnel into deep check."),
-    ("⚡ Near-instant confirm", "4s confirmation. Missing RugCheck data no longer kills the coin."),
-    ("🎯 Early focus kept", "Still aims at low MC with room to run – just no longer silent."),
+    ("🎯 v4.5 – Quality over spam", "Cut the flood of weak callouts. Higher score/legit/buy-pressure bars again."),
+    ("⏱️ No dead low-MC calls", "If a coin is still under $20k MC after 10 minutes, it is skipped (no traction)."),
+    ("🚀 Still early", "Young coins with real momentum can still be called early; stale sub-20k ones cannot."),
+    ("🛡️ Safety kept", "Critical rug checks remain. Focus is cleaner, higher-conviction early runners."),
 ]
 
 
@@ -1217,7 +1220,7 @@ def check_for_tokens():
             continue
         chain, addr = key.split(":", 1)
         ev = evaluate(pair, nsrc.get((chain, addr), 1))
-        if ev and ev[0] >= max(20, MIN_SCORE - 25):     # v4.4: much wider funnel
+        if ev and ev[0] >= max(30, MIN_SCORE - 12):     # v4.5: tighter funnel
             results.append((ev[0], key, pair, ev[1]))
     results.sort(key=lambda x: x[0], reverse=True)
     print(f"  {len(results)} passed market filters")
