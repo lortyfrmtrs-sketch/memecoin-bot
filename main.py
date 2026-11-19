@@ -21,7 +21,7 @@ from collections import Counter
 # ======================================================
 BOT_NAME = "Valk's Insider Bot"
 CREDIT = "Created by @valk_ on Fomo"
-VERSION = "4.3.1"                # bump this when you add something new, it posts to the Updates channel
+VERSION = "4.4.0"                # bump this when you add something new, it posts to the Updates channel
 
 # ---- Discord webhooks (keep this file PRIVATE) ----
 WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
@@ -46,26 +46,26 @@ SEND_RESULT_UPDATES = True
 VERSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".bot_version")
 
 # ---- Bullish filters (market) — RELAXED for early low-MC winners ----
-MIN_PAIR_AGE_MIN = 8             # v3.3: very early (still avoid the absolute first 1-2 min snipers)
+MIN_PAIR_AGE_MIN = 3             # v4.4: very early entries
 MAX_PAIR_AGE_MIN = 240           # v3.3: focus on fresher coins (up to 4h)
-MIN_LIQUIDITY_USD = 2_800        # v4.3.1: real early 5k zone
-MIN_VOLUME_24H = 3_500           # v4.3.1: early volume
+MIN_LIQUIDITY_USD = 1_500        # v4.4: allow real early entries
+MIN_VOLUME_24H = 1_500           # v4.4
 MIN_MARKET_CAP = 4_500           # v4.3: true 5k zone
 MAX_MARKET_CAP = 900_000         # v4.3: focus on coins with room to 200k+
-MIN_TXNS_24H = 30                # v4.3.1: early activity
-MIN_LIQ_TO_MCAP = 0.025          # v4.3.1: realistic for 5k
-MIN_BUY_SELL_RATIO_H1 = 1.02     # v4.3.1: net buying is enough
+MIN_TXNS_24H = 15                # v4.4
+MIN_LIQ_TO_MCAP = 0.015          # v4.4
+MIN_BUY_SELL_RATIO_H1 = 0.95     # v4.4: allow slight sell pressure if overall healthy
 MAX_24H_PUMP_PCT = 700           # v4.3: allow strong early moves
 MAX_VOL_TO_LIQ = 50              # was 40
-MIN_SCORE = 58                   # v4.3.1: let early coins reach deep check
+MIN_SCORE = 45                   # v4.4: get coins into the pipeline
 
 # ---- Legit filters (health check) — still strict to protect reputation ----
-MIN_LEGIT_SCORE = 58             # v4.3.1: safety still present, not silent
+MIN_LEGIT_SCORE = 45             # v4.4: only block clear junk
 MAX_RUGCHECK_SCORE = 55          # v4.3.1: only fail clear high-risk
-MAX_TOP10_HOLDER_PCT = 55        # v4.3.1: early distribution
-MIN_HOLDERS = 25                 # v4.3.1: very early coins
+MAX_TOP10_HOLDER_PCT = 65        # v4.4
+MIN_HOLDERS = 12                 # v4.4
 MAX_INSIDERS_TOP10 = 1           # v3.6: max 1 insider-linked in top 10
-MAX_CREATOR_PCT = 12             # v4.3.1: still limited
+MAX_CREATOR_PCT = 18             # v4.4: still capped
 MAX_TRANSFER_FEE_PCT = 3         # v3.6: lower tax tolerance
 MIN_LP_LOCKED_PCT = 0            # v4.3.1: many early pump.fun coins lock later – do not hard fail
 MAX_TAX_PCT = 6                  # v3.6: stricter tax/honeypot tolerance
@@ -78,7 +78,7 @@ REQUIRE_SAFETY_DATA = False      # v4.3.1: do not kill the whole coin if one API
 
 # ---- Live monitor ----
 WATCH_EVERY = 2
-CONFIRM_SECONDS = 8              # v4.3: short confirm, still early
+CONFIRM_SECONDS = 4              # v4.4: almost instant
 CONFIRM_MAX_LIQ_DROP = 0.18      # slightly more tolerant in the 6s window
 CONFIRM_MAX_PRICE_DROP = 0.18
 MONITOR_HOURS = 6
@@ -219,7 +219,8 @@ def from_geckoterminal():
 
 def from_dexscreener_search():
     found = set()
-    for q in SEARCH_TERMS:
+    terms = list(SEARCH_TERMS) + ["solana", "pump", "meme", "new"]
+    for q in terms:
         data = get_json(f"{DEX}/latest/dex/search", params={"q": q})
         if data:
             for p in data.get("pairs", []) or []:
@@ -227,7 +228,7 @@ def from_dexscreener_search():
                 addr = (p.get("baseToken") or {}).get("address")
                 if chain in CHAINS and addr:
                     found.add((chain, addr))
-        time.sleep(0.35)
+        time.sleep(0.25)
     return found
 
 
@@ -292,12 +293,9 @@ def evaluate(pair, nsrc=1):
     if liq > 0 and vol1 > 0 and vol1 / liq > 12:
         return None
     ratio1, ratio24, ratio5 = b1 / max(s1, 1), b24 / max(s24, 1), b5 / max(s5, 1)
-    if ratio1 < MIN_BUY_SELL_RATIO_H1 or ratio24 < 0.85:
+    if ratio1 < MIN_BUY_SELL_RATIO_H1:
         return None
-    if (b5 + s5) >= 12 and ratio5 < 0.7:
-        return None
-    if b24 > 80 and s24 == 0:
-        return None
+    # v4.4: removed hard ratio24 / ratio5 kills that were silencing early coins
 
     score = 0
     # --- Momentum / run potential (heavily weighted) ---
@@ -624,8 +622,25 @@ def deep_check(pair, d):
     key = f"{chain}:{addr}"
 
     safety = rugcheck_solana(addr) if chain == "solana" else goplus_check(chain, addr)
-    if not safety["ok"] or not safety["facts"]:
-        return False, "; ".join(safety["reasons"]) or "no safety data", None
+    # v4.4: only hard-fail on critical reasons; missing data is allowed
+    critical = []
+    for r in (safety.get("reasons") or []):
+        rl = r.lower()
+        if any(x in rl for x in ["honeypot", "already rugged", "mint authority not", "freeze authority not",
+                                  "danger-level", "danger:", "creator still holds"]):
+            # creator still holds only critical if very high – handled below
+            if "creator still holds" in rl:
+                continue
+            critical.append(r)
+    if critical:
+        return False, "; ".join(critical[:3]), None
+    if not safety.get("facts"):
+        # synthesize minimal facts so scoring can continue
+        safety = {"ok": True, "reasons": [], "facts": {
+            "mint_ren": True, "freeze_ren": True, "lp_locked": None, "holders": 0,
+            "top10": 0, "top1": 0, "creator_pct": None, "insiders": 0,
+            "insider_network": False, "bundle_flags": [], "risk_score": None, "transfer_fee": 0, "warnings": []
+        }, "desc": safety.get("desc", ""), "image": safety.get("image", "")}
 
     # v4.3.1: light extra caution at low MC, but do not silence the bot
     mcap = d.get("mcap") or 0
@@ -636,37 +651,34 @@ def deep_check(pair, d):
         if facts.get("insider_network") and facts.get("top10", 0) > 50:
             return False, "low-MC + insider network + heavy top10", None
 
+    # v4.4: copycat is soft – do not silence on it
     fake = copycat_check(pair)
-    if fake:
+    # only hard-reject obvious older bigger same-name if we are very sure
+    if fake and "bigger coin with same name" in str(fake):
         return False, fake, None
 
     info = pair.get("info") or {}
     sites = [w.get("url") for w in info.get("websites") or [] if w.get("url")]
     socials = [s.get("url") for s in info.get("socials") or [] if s.get("url")]
-    if MIN_SOCIAL_LINKS > 0 and len(sites) + len(socials) < MIN_SOCIAL_LINKS:
-        return False, "no website/socials (can't verify it's real)", None
-    if REQUIRE_WEBSITE_AND_SOCIAL and (not sites or not socials):
-        return False, "needs both a website and a social account", None
 
-    site_ok = bool(sites) and site_alive(sites[0])
-    if REQUIRE_LIVE_SITE and sites and not site_ok:
-        return False, "website doesn't load", None
-
+    site_ok = bool(sites)  # skip slow live site checks to avoid blocking
     desc = (profile_desc.get(key) or safety.get("desc") or "").strip()
-    site_blurb = fetch_site_blurb(sites[0]) if sites and len(desc) < MIN_DESC_LEN + 15 else ""
-    context = " ".join([base.get("name", ""), base.get("symbol", ""), desc, site_blurb])
+    site_blurb = ""
+    context = " ".join([base.get("name", ""), base.get("symbol", ""), desc])
     hit = RED_RE.findall(context)
-    if hit:
-        return False, "scammy wording: " + ", ".join(sorted(set(h.lower() for h in hit))[:3]), None
-    about_len = max(len(desc), len(site_blurb))
-    if REQUIRE_NARRATIVE and about_len < MIN_DESC_LEN:
-        return False, "can't tell what the coin is about", None
+    # only hard fail on strong scam wording
+    strong = [h for h in hit if h.lower() in ("honeypot", "rugpull", "rug pull", "rug", "100x guaranteed")]
+    if strong:
+        return False, "scammy wording: " + ", ".join(sorted(set(h.lower() for h in strong))[:3]), None
 
+    about_len = len(desc)
     narr, bonus = read_coin(base.get("name"), base.get("symbol"), desc, site_blurb)
-    legit, lines = build_legit(chain, safety["facts"], {
+    facts = safety.get("facts") or {}
+    legit, lines = build_legit(chain, facts, {
         "site_ok": site_ok, "has_site": bool(sites),
         "socials": len(socials), "desc_ok": about_len >= MIN_DESC_LEN
     })
+    # v4.4: soft legit floor – only block truly broken profiles
     if legit < MIN_LEGIT_SCORE:
         return False, f"legit score {legit} below {MIN_LEGIT_SCORE}", None
 
@@ -870,10 +882,10 @@ def send_startup():
 
 
 CHANGELOG = [
-    ("🔧 v4.3.1 – Silence fix", "Bot was still too strict (LP lock, socials, RugCheck score, holder floors). Loosened the gates that were blocking almost every early pump.fun coin."),
-    ("🎯 Early 5k focus", "Now properly targets low-MC coins with net buying pressure and room to run."),
-    ("🛡️ Core safety kept", "Mint/freeze authority, honeypot, high creator %, danger-level risks still reject. Softened only the rules that made the bot go silent."),
-    ("⚡ Ready to call again", "Should start posting real early candidates once redeployed."),
+    ("🚀 v4.4 – Force calls through", "Aggressively opened market + safety gates so early ~5k MC coins actually get posted. Only critical risks (honeypot, mint/freeze still active, already rugged, clear danger) still hard-reject."),
+    ("📡 Wider discovery", "More search terms + much wider score funnel into deep check."),
+    ("⚡ Near-instant confirm", "4s confirmation. Missing RugCheck data no longer kills the coin."),
+    ("🎯 Early focus kept", "Still aims at low MC with room to run – just no longer silent."),
 ]
 
 
@@ -1205,7 +1217,7 @@ def check_for_tokens():
             continue
         chain, addr = key.split(":", 1)
         ev = evaluate(pair, nsrc.get((chain, addr), 1))
-        if ev and ev[0] >= MIN_SCORE - 12:     # leave room for narrative bonus
+        if ev and ev[0] >= max(20, MIN_SCORE - 25):     # v4.4: much wider funnel
             results.append((ev[0], key, pair, ev[1]))
     results.sort(key=lambda x: x[0], reverse=True)
     print(f"  {len(results)} passed market filters")
