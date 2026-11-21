@@ -24,16 +24,16 @@ CREDIT = "Created by @valk_ on Fomo"
 VERSION = "4.5.0"                # bump this when you add something new, it posts to the Updates channel
 
 # ---- Discord webhooks (keep this file PRIVATE) ----
-WEBHOOK_URL = "https://discord.com/api/webhooks/1571990911737405582/gk8RqKJdRWjOSahlwoJ1jwgLeGTycEsYipFkYJaidcvUb2mgtv8uGPjBNM888r49wfqp"
+WEBHOOK_URL = "https://discord.com/api/webhooks/1573662878219771936/jdfP_Sj4AGGjzlT3Gh7nLju7yfj6EshWVSetfedNw-4t6Bt2B3tzLnIgQtoTLwXejoIB"
 WEBHOOKS = {
     "callouts": WEBHOOK_URL,   # ONLY live coin calls go here
-    "legit":    "https://discord.com/api/webhooks/1572179140071788584/VkNt0IGCHgf4n5VQIcZpVdkV2SVbSyL-kQiqhW-9LUP0_EZoyOIJPLEbb7zGdGv4ByQn",
-    "exit":     "https://discord.com/api/webhooks/1572181849743163534/EOfiZofRjTm7tMfB_c6dSqAZX33Q25aCNVuFwzzyoi-mOXsrDalgM3G0g7SgvoaOjyYC",
-    "profit":   "https://discord.com/api/webhooks/1572181743602241628/hyY_K931H6dEC8NTd5N5yIuy8ulXok3P9WDXzSVAhsPvozGCILgVSl8_8CoUoCTOWVaq",
-    "updates":  "https://discord.com/api/webhooks/1572187465547255898/zl1XiPtRaCXFylwk84rqllawjUsRTngaY4wFh6Y2uRYsBh1y6cbmwdOIILvTOwnLfCYO",
-    "rejected": "https://discord.com/api/webhooks/1572214932437467290/YDHnjzY-Qye0WLTyZGX7otrFTVDRwXypvbNyTt-6nuRbQelBeullgrfvjWyxXCvwvCVQ",
+    "legit":    "https://discord.com/api/webhooks/1573662360869146784/A1udl5qE6wKHtgzg4XrsVuIQmT_qizlijSQ8WJpGu5ddb6uun8mZwLpY0hiWClzicIfp",
+    "exit":     "https://discord.com/api/webhooks/1573662507980300308/v3eySEA_EXHx88uRyCCO4168eeTaNftG7v5zWP3VObsUE2zyQIlCDlUaN4P2S_XEYvUM",
+    "profit":   "https://discord.com/api/webhooks/1573662623214469182/ZheQyixnrEf6Zq4opXHUlv2cMZ-gB6qdoL0OOI7Mruwz8BiiNUMmFjnXJhNX-oOLtUrG",
+    "updates":  "https://discord.com/api/webhooks/1573661847083814982/60RbYQPm00-4HmWjIAAMTLeYfl7Jhw6hzLRhFL9h4dKtrGswTT4xyMMTB08e0aUWdajJ",
+    "rejected": "https://discord.com/api/webhooks/1573662763480387604/bcLsHutjbxozbXIzG5vdF6iTJ4uTy383D2X5NxRbkTeP1_8K19v5V-cNfOWkSxJZx8Kp",
     # Results / performance tracking (15m, 1h, 6h, 24h) - NEVER goes to callouts
-    "results":  "https://discord.com/api/webhooks/1572558043541938297/97Rv4OO0feG5RGzv4lYBiVOrGr8NaQQZDb7FZ59L9H6rDp3-sfPPF4M_tQocYeT2YmUZ",
+    "results":  "https://discord.com/api/webhooks/1573662177045381133/svYI9CMGxJLnArSTRAg92CsD-qoe55dRSnScliZ5xig9762gyS43C24Qwj1Fh_Y2rcZh",
 }
 
 CHECK_INTERVAL = 18              # v4.3: fast but stable
